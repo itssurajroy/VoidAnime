@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { ExternalLink, AlertTriangle, Shield, Zap, Download, Play, Youtube, Globe, Sparkles } from 'lucide-react';
 import { UNOFFICIAL_SOURCES, AD_LEVEL_CONFIG, UnofficialSource } from '@/lib/utils/streamingLinks';
 import { MAJOR_REGIONS, detectRegion } from '@/lib/utils/regionUtils';
@@ -101,6 +102,17 @@ export function WhereToConsume({ title, category, legalSources = [], mediaId }: 
           {legalSources.length === 0 && <p className="text-sm text-zinc-500 col-span-full py-2">No regional providers detected. <a href={category === 'anime' ? "https://www.crunchyroll.com" : "https://www.viz.com"} target="_blank" className={`${themeColor} ml-1 hover:underline`}>Try {category === 'anime' ? 'Crunchyroll' : 'VIZ / Shonen Jump'} Global →</a></p>}
         </div>
       </div>
+
+      {/* Download Button */}
+      {category === 'anime' && (
+        <Link 
+          href={`/download?anime=${encodeURIComponent(title)}`}
+          className="inline-flex items-center gap-2 bg-anime-primary text-white px-6 py-3 rounded-xl font-bold text-sm uppercase tracking-wider hover:shadow-[0_0_30px_rgba(157,78,221,0.5)] transition-all"
+        >
+          <Download className="w-5 h-5" />
+          Download Episodes
+        </Link>
+      )}
 
       {/* ── UNOFFICIAL TOGGLE ── */}
       <div>

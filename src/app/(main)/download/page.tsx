@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Search, Download, Play, FileText, ChevronDown, Loader2, CheckCircle, XCircle, AlertCircle, Subtitles } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -26,6 +27,7 @@ interface ServerStatus {
 }
 
 export default function DownloadPage() {
+  const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<AniwatchSearchResult[]>([]);
   const [selectedAnime, setSelectedAnime] = useState<AniwatchSearchResult | null>(null);
@@ -68,19 +70,53 @@ export default function DownloadPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  // Handle anime query parameter from URL
+  useEffect(() => {
+    const animeParam = searchParams.get('anime');
+    if (animeParam && !searchQuery) {
+      setSearchQuery(animeParam);
+    }
+  }, [searchParams, searchQuery]);
+
+  // Auto-search when anime param is set
+  useEffect(() => {
+    const animeParam = searchParams.get('anime');
+    if (animeParam && animeParam === searchQuery && searchQuery.trim()) {
+      const timer = setTimeout(async () => {
+        setIsSearching(true);
+        try {
+          const data = await searchAnime(searchQuery);
+          if (data.success && data.data.animes) {
+            setSearchResults(data.data.animes);
+            setShowResults(true);
+          }
+        } catch (err) {
+          console.error('Search error:', err);
+        } finally {
+          setIsSearching(false);
+        }
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [searchQuery, searchParams]);
+
   // Load episodes when anime selected
   useEffect(() => {
     if (!selectedAnime) return;
 
     async function loadEpisodes() {
       setIsLoading(true);
+      setError(null);
       try {
         const data = await getAnimeEpisodes(selectedAnime!.id);
         if (data.success && data.data.episodes) {
           setEpisodes(data.data.episodes.reverse());
+        } else {
+          setError('Failed to load episodes');
         }
       } catch (err) {
         console.error('Episodes error:', err);
+        setError('Failed to load episodes');
       } finally {
         setIsLoading(false);
       }
@@ -95,6 +131,7 @@ export default function DownloadPage() {
     async function loadServers() {
       if (!selectedEpisode) return;
       setIsLoading(true);
+      setError(null);
       setServerStatus([]);
       setStreamingData(null);
       try {
@@ -105,10 +142,15 @@ export default function DownloadPage() {
           if (serverList.length > 0) {
             setSelectedServer(serverList[0].serverName);
             checkServers(serverList, selectedEpisode.episodeId, language);
+          } else {
+            setError('No servers available for this episode');
           }
+        } else {
+          setError('Failed to load servers');
         }
       } catch (err) {
         console.error('Servers error:', err);
+        setError('Failed to load servers');
       } finally {
         setIsLoading(false);
       }
@@ -120,6 +162,9 @@ export default function DownloadPage() {
   const checkServers = async (serverList: { serverName: string }[], episodeId: string, lang: Language) => {
     const status: ServerStatus[] = serverList.map(s => ({ name: s.serverName, working: false, checking: true }));
     setServerStatus(status);
+    setError(null);
+
+    let hasWorkingServer = false;
 
     for (let i = 0; i < serverList.length; i++) {
       const server = serverList[i];
@@ -127,16 +172,23 @@ export default function DownloadPage() {
         const data = await getStreamingLinks(episodeId, server.serverName, lang);
         if (data.success && data.data.sources?.length > 0) {
           status[i] = { name: server.serverName, working: true, checking: false };
+          hasWorkingServer = true;
           if (i === 0) {
             handleStreamingData(data.data, data.data.sources);
           }
         } else {
           status[i] = { name: server.serverName, working: false, checking: false };
+          console.log(`Server ${server.serverName} failed`);
         }
-      } catch {
+      } catch (err) {
         status[i] = { name: server.serverName, working: false, checking: false };
+        console.error(`Server ${server.serverName} error:`, err);
       }
       setServerStatus([...status]);
+    }
+
+    if (!hasWorkingServer) {
+      setError('All servers failed to load. The external API may be experiencing issues or this episode may not be available.');
     }
   };
 
@@ -160,13 +212,17 @@ export default function DownloadPage() {
       if (!selectedEpisode) return;
       setIsLoading(true);
       setStreamingData(null);
+      setError(null);
       try {
         const data = await getStreamingLinks(selectedEpisode.episodeId, selectedServer, language);
-        if (data.success && data.data.sources) {
+        if (data.success && data.data.sources && data.data.sources.length > 0) {
           handleStreamingData(data.data, data.data.sources);
+        } else {
+          setError(`No streaming sources found for ${selectedServer}. Try a different server.`);
         }
       } catch (err) {
         console.error('Streaming error:', err);
+        setError('Failed to load streaming sources. The external API may be experiencing issues.');
       } finally {
         setIsLoading(false);
       }
@@ -195,6 +251,11 @@ export default function DownloadPage() {
           <h1 className="text-3xl md:text-5xl font-heading font-black text-white mb-4">
             Download <span className="glow-text">Anime</span>
           </h1>
+          {searchParams.get('anime') && (
+            <p className="text-anime-primary font-bold mb-2">
+              Ready to download: {searchParams.get('anime')}
+            </p>
+          )}
           <p className="text-zinc-400 max-w-xl mx-auto">
             Search for anime, select episode, choose quality and download
           </p>
@@ -318,6 +379,43 @@ export default function DownloadPage() {
               </div>
             </div>
 
+            {/* Error Display */}
+            {error && (
+              <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-red-400 text-sm font-bold mb-2">{error}</p>
+                    <div className="text-xs text-red-300/70 space-y-1">
+                      <p>This issue is usually caused by:</p>
+                      <ul className="list-disc list-inside space-y-1 ml-2">
+                        <li>The streaming server is temporarily unavailable</li>
+                        <li>The episode ID format has changed</li>
+                        <li>Network issues with the external API</li>
+                      </ul>
+                      <p className="mt-2">Try:</p>
+                      <ul className="list-disc list-inside space-y-1 ml-2">
+                        <li>Selecting a different episode</li>
+                        <li>Choosing a different server (vidstreaming, megacloud, etc.)</li>
+                        <li>Trying again in a few minutes</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* API Status Banner */}
+            <div className="p-3 bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl mb-6">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+                  <span className="text-zinc-400">External API: void-ivory-beta.vercel.app</span>
+                </div>
+                <span className="text-zinc-500">Streaming sources may be unavailable</span>
+              </div>
+            </div>
+
             {/* Server & Quality */}
             {selectedEpisode && serverStatus.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -358,13 +456,14 @@ export default function DownloadPage() {
             )}
 
             {/* Download Buttons */}
-            {videoUrl && selectedEpisode && (
+            {videoUrl && selectedEpisode && streamingData && (
               <div className="space-y-4 pt-4 border-t border-[#2A2A2A]">
                 <div className="flex flex-col sm:flex-row gap-3">
                   <a
-                    href={`/api/stream?url=${encodeURIComponent(videoUrl)}&referer=${encodeURIComponent('https://hianime.to/')}&download=${encodeURIComponent(formatDownloadFilename(selectedAnime.name, selectedEpisode.number))}`}
+                    href={`/api/stream?url=${encodeURIComponent(videoUrl)}&referer=${encodeURIComponent(streamingData.headers?.Referer || 'https://hianime.to/')}&download=${encodeURIComponent(formatDownloadFilename(selectedAnime.name, selectedEpisode.number))}`}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={() => console.log('Download URL:', `/api/stream?url=${encodeURIComponent(videoUrl)}&referer=${encodeURIComponent(streamingData.headers?.Referer || 'https://hianime.to/')}&download=...`)}
                     className="flex-1 flex items-center justify-center gap-2 bg-anime-primary text-white py-4 px-6 rounded-2xl font-bold text-sm uppercase tracking-wider hover:shadow-[0_0_30px_rgba(157,78,221,0.5)] transition-all min-h-[52px]"
                   >
                     <Download className="w-5 h-5" />
@@ -373,7 +472,7 @@ export default function DownloadPage() {
 
                   {streamingData?.subtitles && streamingData.subtitles.length > 0 && (
                     <a
-                      href={`/api/proxy?url=${encodeURIComponent(streamingData.subtitles[0].file)}&referer=${encodeURIComponent('https://hianime.to/')}&download=${encodeURIComponent(formatDownloadFilename(selectedAnime.name, selectedEpisode.number) + '.vtt')}`}
+                      href={`/api/proxy?url=${encodeURIComponent(streamingData.subtitles[0].file)}&referer=${encodeURIComponent(streamingData.headers?.Referer || 'https://hianime.to/')}&download=${encodeURIComponent(formatDownloadFilename(selectedAnime.name, selectedEpisode.number) + '.vtt')}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex-1 flex items-center justify-center gap-2 bg-[#1A1A1A] border border-[#2A2A2A] text-white py-4 px-6 rounded-2xl font-bold text-sm uppercase tracking-wider hover:border-anime-accent/50 transition-all min-h-[52px]"
@@ -417,7 +516,15 @@ export default function DownloadPage() {
           <div className="text-center py-16 border border-dashed border-[#2A2A2A] rounded-3xl">
             <Download className="w-16 h-16 text-zinc-600 mx-auto mb-4" />
             <h3 className="text-xl font-bold text-zinc-400 mb-2">Search for Anime</h3>
-            <p className="text-zinc-500 text-sm">Enter an anime name above to start downloading</p>
+            <p className="text-zinc-500 text-sm mb-4">Enter an anime name above to start downloading</p>
+            <div className="text-xs text-zinc-600 max-w-md mx-auto">
+              <p>Note: Downloads are sourced from third-party providers. If streaming sources fail to load, it may be due to:</p>
+              <ul className="list-disc list-inside mt-2 space-y-1 text-left mx-auto w-fit">
+                <li>External API temporary issues</li>
+                <li>Server unavailability</li>
+                <li>Episode not available for download</li>
+              </ul>
+            </div>
           </div>
         )}
       </div>
