@@ -87,15 +87,13 @@ export interface AniwatchServersResponse {
 
 export interface AniwatchSource {
   url: string;
-  quality: string;
   isM3U8: boolean;
+  quality?: string;
 }
 
-export interface AniwatchTrack {
-  file: string;
-  label?: string;
-  kind?: string;
-  default?: boolean;
+export interface AniwatchSubtitle {
+  lang: string;
+  url: string;
 }
 
 export interface AniwatchStreamingResponse {
@@ -103,8 +101,9 @@ export interface AniwatchStreamingResponse {
   data: {
     headers: Record<string, string>;
     sources: AniwatchSource[];
-    subtitles: AniwatchTrack[];
-    download?: string;
+    subtitles: AniwatchSubtitle[];
+    anilistID: number | null;
+    malID: number | null;
   };
 }
 
@@ -144,23 +143,24 @@ export async function getAnimeEpisodes(animeId: string): Promise<AniwatchEpisode
 }
 
 export async function getEpisodeServers(episodeId: string): Promise<AniwatchServersResponse> {
-  const res = await fetch(`${ANIWATCH_BASE}/episode/servers?animeEpisodeId=${encodeURIComponent(episodeId)}`);
+  // Use URLSearchParams to avoid double encoding of ? if episodeId contains it
+  const res = await fetch(`${ANIWATCH_BASE}/episode/servers?animeEpisodeId=${episodeId}`);
   return res.json();
 }
 
 export async function getStreamingLinks(
   episodeId: string,
-  server: string = 'vidstreaming',
+  server: string = 'hd-1',
   category: string = 'sub'
 ): Promise<AniwatchStreamingResponse> {
   const res = await fetch(
-    `${ANIWATCH_BASE}/episode/sources?animeEpisodeId=${encodeURIComponent(episodeId)}&server=${server}&category=${category}`
+    `${ANIWATCH_BASE}/episode/sources?animeEpisodeId=${episodeId}&server=${server}&category=${category}`
   );
   return res.json();
 }
 
 export function getQualityOptions(sources: AniwatchSource[]): string[] {
-  const qualities = sources.map(s => s.quality).filter(Boolean);
+  const qualities = sources.map(s => s.quality).filter(Boolean) as string[];
   const unique = [...new Set(qualities)];
   return unique.sort((a, b) => {
     const aNum = parseInt(a.replace('p', ''));

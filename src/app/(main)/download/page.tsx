@@ -39,7 +39,7 @@ export default function DownloadPage() {
   const [selectedEpisode, setSelectedEpisode] = useState<AniwatchEpisode | null>(null);
   const [language, setLanguage] = useState<Language>('sub');
   const [servers, setServers] = useState<AniwatchServersResponse['data'] | null>(null);
-  const [selectedServer, setSelectedServer] = useState<string>('vidstreaming');
+  const [selectedServer, setSelectedServer] = useState<string>('hd-1');
   const [serverStatus, setServerStatus] = useState<ServerStatus[]>([]);
   const [streamingData, setStreamingData] = useState<AniwatchStreamingResponse['data'] | null>(null);
   const [qualityOptions, setQualityOptions] = useState<string[]>([]);
@@ -247,7 +247,7 @@ export default function DownloadPage() {
   // Handle streaming data
   const handleStreamingData = (data: AniwatchStreamingResponse['data'], sources: AniwatchSource[]) => {
     setStreamingData(data);
-    const qualities = sources.map(s => s.quality).filter(Boolean);
+    const qualities = sources.map(s => s.quality).filter(Boolean) as string[];
     const unique = [...new Set(qualities)];
     unique.sort((a, b) => parseInt(b.replace('p', '')) - parseInt(a.replace('p', '')));
     setQualityOptions(unique);
@@ -573,13 +573,13 @@ export default function DownloadPage() {
 
                   {streamingData?.subtitles && streamingData.subtitles.length > 0 && (
                     <a
-                      href={`/api/proxy?url=${encodeURIComponent(streamingData.subtitles[0].file)}&referer=${encodeURIComponent(streamingData.headers?.Referer || 'https://hianime.to/')}&download=${encodeURIComponent(formatDownloadFilename(selectedAnime.name, selectedEpisode.number) + '.vtt')}`}
+                      href={`/api/proxy?url=${encodeURIComponent(streamingData.subtitles[0].url)}&referer=${encodeURIComponent(streamingData.headers?.Referer || 'https://hianime.to/')}&download=${encodeURIComponent(formatDownloadFilename(selectedAnime.name, selectedEpisode.number) + '.vtt')}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex-1 flex items-center justify-center gap-2 bg-[#1A1A1A] border border-[#2A2A2A] text-white py-4 px-6 rounded-2xl font-bold text-sm uppercase tracking-wider hover:border-anime-accent/50 transition-all min-h-[52px]"
                     >
                       <Subtitles className="w-5 h-5" />
-                      Download Subtitles ({streamingData.subtitles[0].label || 'Default'})
+                      Download Subtitles ({streamingData.subtitles[0].lang || 'Default'})
                     </a>
                   )}
                 </div>
