@@ -22,6 +22,7 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: 'www.themoviedb.org' },
       { protocol: 'https', hostname: 'artworks.thetvdb.com' },
       { protocol: 'https', hostname: 'm.media-amazon.com' },
+      { protocol: 'https', hostname: 'cdn.noitatnemucod.net' },
     ],
   },
   async headers() {
