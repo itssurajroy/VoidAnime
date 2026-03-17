@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTrending } from '@/lib/api/anilist';
 import { withCache } from '@/lib/cache/withCache';
 
+export const runtime = 'edge';
+
 export async function GET(request: NextRequest) {
   const page = parseInt(request.nextUrl.searchParams.get('page') ?? '1');
   const perPage = parseInt(request.nextUrl.searchParams.get('perPage') ?? '20');

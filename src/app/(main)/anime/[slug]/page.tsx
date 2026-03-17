@@ -19,6 +19,8 @@ interface PageProps {
   params: Promise<{ slug: string }>;
 }
 
+export const revalidate = 3600;
+
 async function getMediaData(slug: string) {
   const extractedId = extractIdFromSlug(slug);
   

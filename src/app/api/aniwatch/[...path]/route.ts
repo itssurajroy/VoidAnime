@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'edge';
+
 const EXTERNAL_ANIWATCH_BASE = 'https://void-ivory-beta.vercel.app/api/v2/hianime';
 
 export async function GET(

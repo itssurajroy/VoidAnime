@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAiringSchedule } from '@/lib/api/anilist';
 import { withCache } from '@/lib/cache/withCache';
 
+export const runtime = 'edge';
+
 export async function GET(request: NextRequest) {
   const now = Math.floor(Date.now() / 1000);
   const weekStart = parseInt(request.nextUrl.searchParams.get('from') ?? String(now));

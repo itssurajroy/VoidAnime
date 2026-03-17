@@ -3,6 +3,8 @@ import { searchAnime } from '@/lib/api/anilist';
 import { withCache } from '@/lib/cache/withCache';
 import type { SearchFilters, MediaType, MediaStatus, MediaSeason, MediaFormat, MediaSort } from '@/types/anime';
 
+export const runtime = 'edge';
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
 

@@ -1,17 +1,20 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Search, Download, Play, FileText, ChevronDown, Loader2, CheckCircle, XCircle, AlertCircle, Subtitles } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useClickOutside } from '@/hooks/useClickOutside';
 import {
   searchAnime,
+  getSearchSuggestions,
   getAnimeEpisodes,
   getEpisodeServers,
   getStreamingLinks,
   formatDownloadFilename,
   AniwatchSearchResult,
+  AniwatchSuggestion,
   AniwatchEpisode,
   AniwatchServersResponse,
   AniwatchStreamingResponse,
@@ -29,6 +32,7 @@ interface ServerStatus {
 export default function DownloadPage() {
   const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
+  const [suggestions, setSuggestions] = useState<AniwatchSuggestion[]>([]);
   const [searchResults, setSearchResults] = useState<AniwatchSearchResult[]>([]);
   const [selectedAnime, setSelectedAnime] = useState<AniwatchSearchResult | null>(null);
   const [episodes, setEpisodes] = useState<AniwatchEpisode[]>([]);
@@ -42,33 +46,81 @@ export default function DownloadPage() {
   const [selectedQuality, setSelectedQuality] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Debounced search
+  const containerRef = useRef<HTMLDivElement>(null);
+  useClickOutside(containerRef, () => {
+    setShowSuggestions(false);
+    setShowResults(false);
+  });
+
+  // Suggestions logic
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
+    if (!searchQuery.trim() || searchQuery.length < 2) {
+      setSuggestions([]);
       return;
     }
 
     const timer = setTimeout(async () => {
-      setIsSearching(true);
       try {
-        const data = await searchAnime(searchQuery);
-        if (data.success && data.data.animes) {
-          setSearchResults(data.data.animes);
-          setShowResults(true);
+        const data = await getSearchSuggestions(searchQuery);
+        if (data.success && data.data.suggestions) {
+          setSuggestions(data.data.suggestions);
+          setShowSuggestions(true);
         }
       } catch (err) {
-        console.error('Search error:', err);
-      } finally {
-        setIsSearching(false);
+        console.error('Suggestions error:', err);
       }
-    }, 500);
+    }, 300);
 
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  const handleSearch = async (query: string) => {
+    if (!query.trim()) return;
+    setIsSearching(true);
+    setShowSuggestions(false);
+    try {
+      const data = await searchAnime(query);
+      if (data.success && data.data.animes) {
+        setSearchResults(data.data.animes);
+        setShowResults(true);
+      }
+    } catch (err) {
+      console.error('Search error:', err);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const selectAnimeFromId = async (animeId: string) => {
+    setIsLoading(true);
+    setShowSuggestions(false);
+    setShowResults(false);
+    try {
+      // Fetch results to get the full search item data
+      const data = await searchAnime(searchQuery);
+      let found = data.data.animes.find(a => a.id === animeId);
+      
+      // If not found in current query, try finding by specific ID logic if API supported it
+      // Since it doesn't seem to have a direct getInfoById for HiAnime in current lib, we use this.
+      if (!found) {
+        // Just use the first result as fallback if suggestion was clicked
+        found = data.data.animes[0];
+      }
+
+      if (found) {
+        setSelectedAnime(found);
+        setSearchQuery(found.name);
+      }
+    } catch (err) {
+      console.error('Select error:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Handle anime query parameter from URL
   useEffect(() => {
@@ -262,14 +314,18 @@ export default function DownloadPage() {
         </div>
 
         {/* Search */}
-        <div className="relative mb-8">
+        <div className="relative mb-8" ref={containerRef}>
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => searchResults.length > 0 && setShowResults(true)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch(searchQuery)}
+              onFocus={() => {
+                if (suggestions.length > 0) setShowSuggestions(true);
+                if (searchResults.length > 0) setShowResults(true);
+              }}
               placeholder="Search anime name..."
               className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl py-4 pl-12 pr-4 text-white placeholder:text-zinc-500 focus:border-anime-primary outline-none transition-colors"
             />
@@ -278,9 +334,54 @@ export default function DownloadPage() {
             )}
           </div>
 
-          {/* Results Dropdown */}
-          {showResults && searchResults.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl overflow-hidden z-50 max-h-80 overflow-y-auto">
+          {/* Suggestions Dropdown */}
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl overflow-hidden z-[60] shadow-2xl">
+              <div className="p-2 border-b border-white/5 bg-white/5">
+                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 px-2">Suggestions</p>
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.id}
+                    onClick={() => {
+                      setSearchQuery(suggestion.name);
+                      selectAnimeFromId(suggestion.id);
+                    }}
+                    className="w-full flex items-center gap-3 p-3 hover:bg-white/5 transition-colors text-left group"
+                  >
+                    <div className="relative w-10 h-14 rounded-lg overflow-hidden shrink-0 border border-white/5">
+                      <Image src={suggestion.poster} alt={suggestion.name} fill className="object-cover" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white font-bold truncate group-hover:text-anime-primary transition-colors">{suggestion.name}</p>
+                      <p className="text-zinc-500 text-xs truncate italic">{suggestion.jname}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        {suggestion.moreInfo.map((info, i) => (
+                          <span key={i} className="text-[9px] font-bold text-zinc-600 uppercase bg-white/5 px-1.5 py-0.5 rounded">
+                            {info}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <button 
+                onClick={() => handleSearch(searchQuery)}
+                className="w-full p-3 bg-anime-primary/10 text-anime-primary text-[10px] font-black uppercase tracking-widest hover:bg-anime-primary hover:text-white transition-all"
+              >
+                View all results for "{searchQuery}"
+              </button>
+            </div>
+          )}
+
+          {/* Search Results Dropdown */}
+          {showResults && !showSuggestions && searchResults.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl overflow-hidden z-50 max-h-80 overflow-y-auto shadow-2xl">
+              <div className="p-2 border-b border-white/5 bg-white/5">
+                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 px-2">Search Results</p>
+              </div>
               {searchResults.map((anime) => (
                 <button
                   key={anime.id}
@@ -291,13 +392,13 @@ export default function DownloadPage() {
                     setSelectedEpisode(null);
                     setEpisodes([]);
                   }}
-                  className="w-full flex items-center gap-3 p-3 hover:bg-white/5 transition-colors text-left"
+                  className="w-full flex items-center gap-3 p-3 hover:bg-white/5 transition-colors text-left group"
                 >
                   <div className="relative w-12 h-16 rounded-lg overflow-hidden shrink-0">
                     <Image src={anime.poster} alt={anime.name} fill className="object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-white font-bold truncate">{anime.name}</p>
+                    <p className="text-white font-bold truncate group-hover:text-anime-primary transition-colors">{anime.name}</p>
                     <p className="text-zinc-500 text-sm">{anime.type} • {anime.episodes.sub} sub • {anime.episodes.dub} dub</p>
                   </div>
                 </button>

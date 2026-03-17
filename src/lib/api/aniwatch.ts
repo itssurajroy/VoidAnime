@@ -17,10 +17,41 @@ export interface AniwatchSearchResponse {
   success: boolean;
   data: {
     animes: AniwatchSearchResult[];
+    mostPopularAnimes?: any[];
     currentPage: number;
     totalPages: number;
     hasNextPage: boolean;
+    searchQuery: string;
+    searchFilters: Record<string, any>;
   };
+}
+
+export interface AniwatchSuggestion {
+  id: string;
+  name: string;
+  poster: string;
+  jname: string;
+  moreInfo: string[];
+}
+
+export interface AniwatchSuggestionResponse {
+  success: boolean;
+  data: {
+    suggestions: AniwatchSuggestion[];
+  };
+}
+
+export interface AdvancedSearchFilters {
+  genres?: string;
+  type?: string;
+  sort?: string;
+  season?: string;
+  language?: string;
+  status?: string;
+  rated?: string;
+  start_date?: string;
+  end_date?: string;
+  score?: string;
 }
 
 export interface AniwatchEpisode {
@@ -77,8 +108,28 @@ export interface AniwatchStreamingResponse {
   };
 }
 
-export async function searchAnime(query: string, page: number = 1): Promise<AniwatchSearchResponse> {
-  const res = await fetch(`${ANIWATCH_BASE}/search?q=${encodeURIComponent(query)}&page=${page}`);
+export async function searchAnime(
+  query: string, 
+  page: number = 1, 
+  filters?: AdvancedSearchFilters
+): Promise<AniwatchSearchResponse> {
+  const params = new URLSearchParams({
+    q: query,
+    page: page.toString(),
+  });
+
+  if (filters) {
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.append(key, value);
+    });
+  }
+
+  const res = await fetch(`${ANIWATCH_BASE}/search?${params.toString()}`);
+  return res.json();
+}
+
+export async function getSearchSuggestions(query: string): Promise<AniwatchSuggestionResponse> {
+  const res = await fetch(`${ANIWATCH_BASE}/search/suggestion?q=${encodeURIComponent(query)}`);
   return res.json();
 }
 

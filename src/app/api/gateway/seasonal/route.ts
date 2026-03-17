@@ -3,6 +3,8 @@ import { getSeasonalAnime } from '@/lib/api/anilist';
 import { withCache } from '@/lib/cache/withCache';
 import type { MediaSeason } from '@/types/anime';
 
+export const runtime = 'edge';
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const season = (searchParams.get('season') as MediaSeason) ?? 'SPRING';

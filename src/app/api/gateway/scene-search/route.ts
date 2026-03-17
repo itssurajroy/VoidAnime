@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'edge';
+
 const TRACE_MOE = 'https://api.trace.moe/search';
 
 function buildTraceMoeUrl(params: {
