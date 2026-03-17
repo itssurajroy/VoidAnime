@@ -1,0 +1,201 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800;900&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  /* Using RGB to avoid automated modern color space conversion by lightningcss */
+  --color-anime-primary: rgb(157, 78, 221);
+  --color-anime-secondary: rgb(90, 24, 154);
+  --color-anime-accent: rgb(199, 125, 255);
+  --color-anime-glow: rgb(123, 47, 190);
+  
+  /* Cyberpunk Secondary Neon (Cyan) */
+  --color-anime-cyan: rgb(0, 240, 255);
+  --color-anime-cyan-glow: rgb(0, 180, 216);
+
+  /* Deep True Blacks for Higher Contrast */
+  --color-dark-bg: rgb(5, 5, 5);
+  --color-dark-surface: rgb(14, 14, 14);
+  --color-dark-border: rgb(30, 30, 30);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  ::selection {
+    background-color: var(--color-anime-primary);
+    color: white;
+  }
+  
+  body {
+    background-color: var(--color-dark-bg);
+    color: rgb(243, 244, 246);
+    overscroll-behavior-y: contain;
+  }
+}
+
+@layer components {
+  /* Glassmorphism Utilities */
+  .glass-panel {
+    background: var(--color-dark-surface);
+    border: 1px solid var(--color-dark-border);
+  }
+
+  .glass-navbar {
+    background: var(--color-dark-bg);
+    border-bottom: 1px solid var(--color-dark-border);
+  }
+
+  .glass-dropdown {
+    background: var(--color-dark-surface);
+    border: 1px solid var(--color-dark-border);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9);
+  }
+
+  /* Skeleton Loaders */
+  .skeleton {
+    background-color: var(--color-dark-surface);
+    position: relative;
+    overflow: hidden;
+    border-radius: 0.375rem;
+    background: linear-gradient(90deg, var(--color-dark-surface) 25%, rgb(25, 25, 25) 50%, var(--color-dark-surface) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+  
+  /* Typography */
+  .glow-text {
+    background: linear-gradient(to right, rgb(157, 78, 221), rgb(199, 125, 255), rgb(0, 240, 255));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: gradient-shift 4s ease infinite;
+    background-size: 200% auto;
+  }
+
+  /* Shadows and Borders */
+  .purple-glow {
+    box-shadow: 0 0 20px rgba(157, 78, 221, 0.3), 0 0 40px rgba(90, 24, 154, 0.15);
+  }
+
+  .cyan-glow {
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.3), 0 0 40px rgba(0, 180, 216, 0.15);
+  }
+
+  .neon-border {
+    position: relative;
+  }
+  
+  .neon-border::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(to bottom right, rgba(157, 78, 221, 0.5), rgba(0, 240, 255, 0.2), transparent);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .anime-card-hover {
+    transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  
+  .anime-card-hover:hover {
+    transform: translateY(-6px) scale(1.02);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(157, 78, 221, 0.3);
+  }
+  
+  /* Scrollbars */
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  
+  .scrollbar-thin::-webkit-scrollbar { width: 4px; height: 4px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { 
+    background: var(--color-dark-border); 
+    border-radius: 9999px; 
+  }
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* iOS autofill fix */
+  input:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 100px var(--color-dark-surface) inset !important;
+    -webkit-text-fill-color: white !important;
+  }
+}
+
+/* Animations */
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.6s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-pulse-soft {
+  animation: pulseSoft 4s ease-in-out infinite;
+}
+
+@keyframes pulseSoft {
+  0%, 100% { opacity: 0.3; transform: scale(1.05); }
+  50% { opacity: 0.4; transform: scale(1.08); }
+}
+
+.animate-spin-slow {
+  animation: spin 8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Accessibility: Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Base resets */
+* {
+  -webkit-tap-highlight-color: transparent;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-dark-border) transparent;
+}
+
+html, body {
+  overscroll-behavior-y: contain;
+}
+
+/* Input autofill styling for dark theme */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 100px var(--color-dark-surface) inset;
+  -webkit-text-fill-color: white;
+  caret-color: white;
+  transition: background-color 5000s ease-in-out 0s;
+}
