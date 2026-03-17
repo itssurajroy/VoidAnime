@@ -1,0 +1,181 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Helper function to check if user is the owner
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Helper function to check if user is a participant of a room
+    function isParticipant(roomId) {
+      return request.auth != null && exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid));
+    }
+
+    // User Profiles & Private Data
+    match /users/{userId} {
+      // Allow anyone to read profiles (for leaderboard and community)
+      allow read: if true;
+      // Only the owner can write to their profile, or an admin
+      allow write: if isOwner(userId) || isAdmin();
+      
+      // Watchlist sub-collection
+      match /watchlist/{animeId} {
+        allow read: if true;
+        allow write: if isOwner(userId) || isAdmin();
+      }
+      
+      // User's copy of their reviews
+      match /reviews/{reviewId} {
+        allow read: if true;
+        allow write: if isOwner(userId) || isAdmin();
+      }
+
+      // User's private watch history
+      match /watchHistory/{episodeId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      // User's favorites
+      match /favorites/{animeId} {
+        allow read: if true;
+        allow write: if isOwner(userId) || isAdmin();
+      }
+
+      // User's XP history
+      match /xpHistory/{logId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId) || isAdmin();
+      }
+    }
+    
+    // Global Anime Reviews
+    match /anime-reviews/{animeId}/reviews/{reviewId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && (request.auth.uid == resource.data.userId || isAdmin());
+      
+      // Specialized rule for liking
+      allow update: if request.auth != null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']);
+    }
+    
+    // Global Comments System
+    match /comments/{animeId}/messages/{commentId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && (request.auth.uid == resource.data.userId || isAdmin());
+      
+      // Liking is allowed for any authenticated user
+      allow update: if request.auth != null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']);
+      // Moderation (hiding) is allowed for admins or the author
+      allow update: if (request.auth != null && (request.auth.uid == resource.data.userId || isAdmin())) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isHidden']);
+    }
+
+    // Community Posts
+    match /community_posts/{postId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        request.auth.uid == resource.data.userId || 
+        isAdmin() ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'commentsCount'])
+      );
+      allow delete: if request.auth != null && (request.auth.uid == resource.data.userId || isAdmin());
+    }
+
+    // Watch Together Rooms
+    match /rooms/{roomId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && (request.auth.uid == resource.data.hostId || isAdmin());
+      
+      // Room Participants
+      match /participants/{userId} {
+        allow read: if true;
+        allow write: if isOwner(userId) || isAdmin();
+      }
+
+      // Room Chat
+      match /chat/{messageId} {
+        allow read: if isParticipant(roomId);
+        allow create: if isParticipant(roomId);
+      }
+    }
+
+    // Moderation Reports
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if request.auth != null;
+      allow update: if isAdmin();
+    }
+    
+    // Analytics
+    match /analytics/{docId} {
+      allow create: if request.auth != null;
+      allow read, write: if isAdmin();
+    }
+    
+    // Admin Audit Logs
+    match /adminAuditLogs/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Admin Activity Feed
+    match /adminActivity/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Ad Management
+    match /adProviders/{docId} {
+      allow read, write: if isAdmin();
+    }
+    match /adCampaigns/{docId} {
+      allow read, write: if isAdmin();
+    }
+    match /adPlacements/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // System Configuration
+    match /system/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Banned Users
+    match /bannedUsers/{userId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // News
+    match /news/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Site Settings & Configuration
+    match /siteConfig/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Notifications System
+    match /notifications/{notificationId} {
+      // Allow users to read their own notifications
+      allow read: if request.auth != null && request.auth.uid == resource.data.recipientId;
+      // Creation is handled via server actions, so client-side create can be restricted
+      // But we allow updates for marking as read and deletion by the owner
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.recipientId;
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
