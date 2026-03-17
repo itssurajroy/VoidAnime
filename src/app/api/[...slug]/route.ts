@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getHiAnimeServers, getHiAnimeSourceUrl } from '@/lib/extractors/hianime';
 import { extractMegacloud } from '@/lib/extractors/megacloud';
 
-const EXTERNAL_API_BASE_URL = process.env.EXTERNAL_API_BASE_URL || 'https://aniwatch-api-five-dusky.vercel.app';
+const EXTERNAL_API_BASE_URL = process.env.EXTERNAL_API_BASE_URL || 'https://void-ivory-beta.vercel.app';
 
 function setCorsHeaders(response: NextResponse, origin: string | null) {
   response.headers.set('Access-Control-Allow-Origin', origin || '*');

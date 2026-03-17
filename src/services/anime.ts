@@ -14,7 +14,7 @@ import type {
   ScheduleData
 } from '@/types';
 
-const EXTERNAL_API_BASE_URL = process.env.EXTERNAL_API_BASE_URL || 'https://aniwatch-api-five-dusky.vercel.app';
+const EXTERNAL_API_BASE_URL = process.env.EXTERNAL_API_BASE_URL || 'https://void-ivory-beta.vercel.app';
 
 async function apiFetch<T>(endpoint: string, revalidate: number = 3600): Promise<T> {
   // If on server, fetch directly from external API

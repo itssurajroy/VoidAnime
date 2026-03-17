@@ -32,7 +32,7 @@ export default async function WatchPage({
   let animeData: any = null;
   let aniListData: any = null;
 
-  const EXTERNAL_API_BASE_URL = process.env.EXTERNAL_API_BASE_URL || 'https://aniwatch-api-five-dusky.vercel.app';
+  const EXTERNAL_API_BASE_URL = process.env.EXTERNAL_API_BASE_URL || 'https://void-ivory-beta.vercel.app';
 
   try {
     // 1. Fetch Anime Details

@@ -15,10 +15,9 @@ import {
     SkipForward,
     Download,
     Clock,
-    Flame,
-    Badge
+    Flame
 } from 'lucide-react';
-import { Badge as UiBadge } from '@/components/ui/badge';
+import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';

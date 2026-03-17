@@ -12,8 +12,9 @@ export interface Room {
   currentTime: number;
   updatedAt: Date;
   maxParticipants: number;
+  participantCount: number;
   serverId?: string;
-  category?: 'sub' | 'dub';
+  category?: 'sub' | 'dub' | 'raw';
 }
 
 export interface RoomParticipant {
@@ -39,7 +40,7 @@ export interface PlaybackState {
   currentTime: number;
   episodeId: string;
   serverId?: string;
-  category?: 'sub' | 'dub';
+  category?: 'sub' | 'dub' | 'raw';
   updatedAt: Date;
   updatedBy: string;
 }
