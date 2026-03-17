@@ -407,6 +407,36 @@ export default function DownloadPage() {
           )}
         </div>
 
+        {/* Results Grid (When not selected yet but have results) */}
+        {!selectedAnime && searchResults.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6 animate-slide-up">
+            {searchResults.map((anime) => (
+              <button
+                key={anime.id}
+                onClick={() => {
+                  setSelectedAnime(anime);
+                  setSearchQuery(anime.name);
+                  setShowResults(false);
+                  setSelectedEpisode(null);
+                  setEpisodes([]);
+                }}
+                className="group flex flex-col gap-3 text-left"
+              >
+                <div className="relative aspect-[2/3] w-full rounded-2xl overflow-hidden shadow-lg border border-white/5 group-hover:border-anime-primary/50 transition-all">
+                  <Image src={anime.poster} alt={anime.name} fill className="object-cover group-hover:scale-110 transition-transform duration-500" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                    <span className="text-[10px] font-black uppercase text-white bg-anime-primary px-2 py-1 rounded">Select</span>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white line-clamp-1 group-hover:text-anime-primary transition-colors">{anime.name}</h3>
+                  <p className="text-[10px] text-zinc-500 font-bold uppercase mt-1">{anime.type} • {anime.episodes.sub} SUB</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
         {selectedAnime && (
           <div className="space-y-6">
             {/* Selected Anime Info */}
@@ -613,8 +643,8 @@ export default function DownloadPage() {
         )}
 
         {/* Empty State */}
-        {!selectedAnime && (
-          <div className="text-center py-16 border border-dashed border-[#2A2A2A] rounded-3xl">
+        {!selectedAnime && searchResults.length === 0 && (
+          <div className="text-center py-16 border border-dashed border-[#2A2A2A] rounded-3xl animate-slide-up">
             <Download className="w-16 h-16 text-zinc-600 mx-auto mb-4" />
             <h3 className="text-xl font-bold text-zinc-400 mb-2">Search for Anime</h3>
             <p className="text-zinc-500 text-sm mb-4">Enter an anime name above to start downloading</p>
