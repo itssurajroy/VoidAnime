@@ -1,4 +1,6 @@
-import { db } from '@/lib/firebase-admin';
+import { supabaseAdmin as _supabaseAdmin } from '@/lib/supabase-admin';
+
+const supabaseAdmin = _supabaseAdmin!;
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://voidanime.online';
 
@@ -11,7 +13,7 @@ export interface SeoSettings {
   robotsTxt: string;
 }
 
-const COLLECTION = 'settings';
+const TABLE_NAME = 'settings';
 const DOC_ID = 'seo';
 
 const DEFAULT_SETTINGS: SeoSettings = {
@@ -33,14 +35,21 @@ Sitemap: ${APP_URL}/sitemap.xml`
 };
 
 export async function getSeoSettings(): Promise<SeoSettings> {
-  if (!db) return DEFAULT_SETTINGS;
   try {
-    const doc = await db.collection(COLLECTION).doc(DOC_ID).get();
-    if (!doc.exists) {
-        await db.collection(COLLECTION).doc(DOC_ID).set(DEFAULT_SETTINGS);
+    const { data, error } = await supabaseAdmin
+        .from(TABLE_NAME)
+        .select('*')
+        .eq('id', DOC_ID)
+        .maybeSingle();
+
+    if (error) throw error;
+    
+    if (!data) {
+        await supabaseAdmin.from(TABLE_NAME).insert([{ id: DOC_ID, ...DEFAULT_SETTINGS }]);
         return DEFAULT_SETTINGS;
     }
-    return { ...DEFAULT_SETTINGS, ...doc.data() } as SeoSettings;
+    
+    return { ...DEFAULT_SETTINGS, ...data } as SeoSettings;
   } catch (e) {
     console.error('Error fetching SEO settings:', e);
     return DEFAULT_SETTINGS;
@@ -48,9 +57,12 @@ export async function getSeoSettings(): Promise<SeoSettings> {
 }
 
 export async function saveSeoSettings(newSettings: Partial<SeoSettings>) {
-    if (!db) return { success: false, error: 'Database not initialized' };
     try {
-        await db.collection(COLLECTION).doc(DOC_ID).set(newSettings, { merge: true });
+        const { error } = await supabaseAdmin
+            .from(TABLE_NAME)
+            .upsert({ id: DOC_ID, ...newSettings });
+            
+        if (error) throw error;
         return { success: true };
     } catch (e) {
         console.error('Error saving SEO settings:', e);

@@ -2,8 +2,8 @@
 
 import { Play, RotateCcw } from 'lucide-react';
 import Link from 'next/link';
-import { useWatchlist } from '@/hooks/use-watchlist';
-import { useUser } from '@/firebase';
+import { useWatchlist } from '@/hooks/use-supabase-watchlist';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -14,10 +14,10 @@ interface WatchNowButtonProps {
 }
 
 export function WatchNowButton({ animeId, firstEpisodeId, episodes }: WatchNowButtonProps) {
-    const { user } = useUser();
+    const { user } = useSupabaseAuth();
     const { watchlist } = useWatchlist();
     
-    const watchlistItem = watchlist.find(item => item.id === animeId);
+    const watchlistItem = watchlist.find(item => item.anime_id === animeId);
     const progress = watchlistItem?.progress || 0;
     
     // Find the episode based on progress

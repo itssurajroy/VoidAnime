@@ -1,7 +1,9 @@
 'use server';
 
-import { db } from '@/lib/firebase-admin';
+import { supabaseAdmin as _supabaseAdmin } from '@/lib/supabase-admin';
 import { revalidatePath } from 'next/cache';
+
+const supabaseAdmin = _supabaseAdmin!;
 
 export type AuditLogAction = 
   | 'USER_CREATED'
@@ -44,24 +46,25 @@ export async function createAuditLog(
   ipAddress?: string,
   userAgent?: string
 ): Promise<{ success: boolean; logId?: string }> {
-  if (!db) {
-    return { success: false };
-  }
-
   try {
-    const logRef = db.collection('adminAuditLogs').doc();
-    await logRef.set({
-      action,
-      targetType,
-      targetId,
-      adminId,
-      details,
-      ipAddress: ipAddress || 'server',
-      userAgent: userAgent || 'server',
-      timestamp: new Date().toISOString(),
-    });
+    const { data, error } = await supabaseAdmin
+      .from('admin_audit_logs')
+      .insert([{
+        action,
+        target_type: targetType,
+        target_id: targetId,
+        admin_id: adminId,
+        details,
+        ip_address: ipAddress || 'server',
+        user_agent: userAgent || 'server',
+        timestamp: new Date().toISOString(),
+      }])
+      .select()
+      .single();
 
-    return { success: true, logId: logRef.id };
+    if (error) throw error;
+
+    return { success: true, logId: data.id };
   } catch (error) {
     console.error('Failed to create audit log:', error);
     return { success: false };
@@ -77,47 +80,47 @@ export async function getAuditLogs(
   startDate?: string,
   endDate?: string
 ): Promise<{ logs: AuditLog[]; total: number; totalPages: number }> {
-  if (!db) {
-    return { logs: [], total: 0, totalPages: 0 };
-  }
-
   try {
-    let query: any = db.collection('adminAuditLogs');
+    let query = supabaseAdmin
+      .from('admin_audit_logs')
+      .select('*', { count: 'exact' });
 
     if (action) {
-      query = query.where('action', '==', action);
+      query = query.eq('action', action);
     }
     if (targetType) {
-      query = query.where('targetType', '==', targetType);
+      query = query.eq('target_type', targetType);
     }
     if (adminId) {
-      query = query.where('adminId', '==', adminId);
+      query = query.eq('admin_id', adminId);
+    }
+    if (startDate) {
+      query = query.gte('timestamp', startDate);
+    }
+    if (endDate) {
+      query = query.lte('timestamp', endDate);
     }
 
-    query = query.orderBy('timestamp', 'desc');
+    const { data, count, error } = await query
+      .order('timestamp', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
 
-    const snapshot = await query
-      .limit(limit)
-      .offset((page - 1) * limit)
-      .get();
+    if (error) throw error;
 
-    let logs: AuditLog[] = [];
-    
-    snapshot.docs.forEach((doc: any) => {
-        const data = doc.data();
-        const logDate = data.timestamp;
-        if (startDate && logDate < startDate) return;
-        if (endDate && logDate > endDate) return;
-        
-        logs.push({
-          id: doc.id,
-          ...data,
-          timestamp: data.timestamp?.toDate?.() ? data.timestamp.toDate().toISOString() : (typeof data.timestamp === 'string' ? data.timestamp : new Date().toISOString()),
-        } as AuditLog);
-    });
+    const logs: AuditLog[] = data?.map(row => ({
+      id: row.id,
+      action: row.action,
+      targetType: row.target_type,
+      targetId: row.target_id,
+      adminId: row.admin_id,
+      adminName: row.admin_name,
+      details: row.details,
+      ipAddress: row.ip_address,
+      userAgent: row.user_agent,
+      timestamp: row.timestamp,
+    })) || [];
 
-    const countSnapshot = await db.collection('adminAuditLogs').count().get();
-    const total = countSnapshot.data().count || 0;
+    const total = count || 0;
     const totalPages = Math.ceil(total / limit);
 
     return { logs, total, totalPages };
@@ -128,21 +131,26 @@ export async function getAuditLogs(
 }
 
 export async function getAuditLogById(logId: string): Promise<AuditLog | null> {
-  if (!db) {
-    return null;
-  }
-
   try {
-    const doc = await db.collection('adminAuditLogs').doc(logId).get();
-    if (!doc.exists) {
-      return null;
-    }
+    const { data, error } = await supabaseAdmin
+      .from('admin_audit_logs')
+      .select('*')
+      .eq('id', logId)
+      .single();
 
-    const data = doc.data();
+    if (error) throw error;
+
     return {
-      id: doc.id,
-      ...data,
-      timestamp: data?.timestamp?.toDate?.() ? data.timestamp.toDate().toISOString() : (typeof data?.timestamp === 'string' ? data.timestamp : new Date().toISOString()),
+      id: data.id,
+      action: data.action,
+      targetType: data.target_type,
+      targetId: data.target_id,
+      adminId: data.admin_id,
+      adminName: data.admin_name,
+      details: data.details,
+      ipAddress: data.ip_address,
+      userAgent: data.user_agent,
+      timestamp: data.timestamp,
     } as AuditLog;
   } catch (error) {
     console.error('Failed to get audit log:', error);
@@ -151,28 +159,25 @@ export async function getAuditLogById(logId: string): Promise<AuditLog | null> {
 }
 
 export async function getAuditLogStats(days: number = 30) {
-  if (!db) {
-    return { total: 0, byAction: {}, byAdmin: {} };
-  }
-
   try {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    const snapshot = await db.collection('adminAuditLogs')
-      .where('timestamp', '>=', startDate.toISOString())
-      .get();
+    const { data, error } = await supabaseAdmin
+      .from('admin_audit_logs')
+      .select('action, admin_id')
+      .gte('timestamp', startDate.toISOString());
+
+    if (error) throw error;
 
     const byAction: Record<string, number> = {};
     const byAdmin: Record<string, number> = {};
     let total = 0;
 
-    snapshot.docs.forEach((doc) => {
-      const data = doc.data();
+    data?.forEach((row) => {
       total++;
-      
-      byAction[data.action as string] = (byAction[data.action as string] || 0) + 1;
-      byAdmin[data.adminId as string] = (byAdmin[data.adminId as string] || 0) + 1;
+      byAction[row.action as string] = (byAction[row.action as string] || 0) + 1;
+      byAdmin[row.admin_id as string] = (byAdmin[row.admin_id as string] || 0) + 1;
     });
 
     return { total, byAction, byAdmin };

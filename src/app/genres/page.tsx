@@ -7,8 +7,8 @@ import { Breadcrumbs } from "@/components/shared/Breadcrumbs";
 import { GlassPanel } from "@/components/ui/GlassPanel";
 
 export default async function GenresPage() {
-    const { data } = await getHomeData();
-    const genres = data.genres || [];
+    const { data }: any = await getHomeData();
+    const genres: string[] = data?.genres || [];
 
     // Aesthetic color mapping for some genres to make it look premium
     const genreColors: Record<string, string> = {

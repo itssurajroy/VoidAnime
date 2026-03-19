@@ -1,29 +1,37 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
-import { useUser, useStorage } from '@/firebase';
-import { updateProfile } from 'firebase/auth';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
+import { createBrowserClient } from '@supabase/ssr';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Loader2, Upload, Camera } from 'lucide-react';
+import { Loader2, Camera } from 'lucide-react';
 
 export function ProfileSettings() {
-  const { user } = useUser();
-  const storage = useStorage();
+  const { user } = useSupabaseAuth();
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
   const { toast } = useToast();
-  const [displayName, setDisplayName] = useState(user?.displayName || '');
+  const [displayName, setDisplayName] = useState(user?.user_metadata?.username || '');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (user?.user_metadata?.username) {
+      setDisplayName(user.user_metadata.username);
+    }
+  }, [user]);
+
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !user || !storage) return;
+    if (!file || !user) return;
 
     if (file.size > 2 * 1024 * 1024) {
       toast({
@@ -36,11 +44,24 @@ export function ProfileSettings() {
 
     setIsUploading(true);
     try {
-      const storageRef = ref(storage, `avatars/${user.uid}/${Date.now()}_${file.name}`);
-      const snapshot = await uploadBytes(storageRef, file);
-      const downloadURL = await getDownloadURL(snapshot.ref);
+      const fileExt = file.name.split('.').pop();
+      const filePath = `${user.id}/${Math.random()}.${fileExt}`;
 
-      await updateProfile(user, { photoURL: downloadURL });
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      const { error: updateError } = await supabase.auth.updateUser({
+        data: { avatar_url: publicUrl }
+      });
+
+      if (updateError) throw updateError;
 
       toast({
         title: 'Success',
@@ -63,7 +84,12 @@ export function ProfileSettings() {
 
     setIsLoading(true);
     try {
-      await updateProfile(user, { displayName });
+      const { error } = await supabase.auth.updateUser({
+        data: { username: displayName }
+      });
+      
+      if (error) throw error;
+
       toast({
         title: 'Success',
         description: 'Your profile has been updated.',
@@ -89,9 +115,9 @@ export function ProfileSettings() {
         <div className="flex flex-col md:flex-row items-center gap-10">
           <div className="relative group/avatar">
             <div className="h-32 w-32 rounded-[40px] bg-white/5 flex items-center justify-center overflow-hidden ring-4 ring-primary/20 transition-all duration-700 group-hover/avatar:ring-primary/50 group-hover/avatar:rounded-[32px]">
-              {user?.photoURL ? (
+              {user?.user_metadata?.avatar_url ? (
                 <Image 
-                  src={user.photoURL} 
+                  src={user.user_metadata.avatar_url} 
                   alt="Profile" 
                   fill
                   className="object-cover transition-transform duration-1000 group-hover/avatar:scale-110"

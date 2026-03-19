@@ -1,31 +1,46 @@
 import { cookies } from 'next/headers';
-import { db, auth } from '@/lib/firebase-admin';
+import { supabaseAdmin as _supabaseAdmin } from '@/lib/supabase-admin';
 import type { UserRole } from '@/types/db';
 
-export async function verifyServerSession(): Promise<{ uid: string; role: UserRole } | null> {
-  if (!db || !auth) {
-    return null;
-  }
+const supabaseAdmin = _supabaseAdmin!;
 
+export async function verifyServerSession(): Promise<{ uid: string; role: UserRole } | null> {
   try {
     const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get('session')?.value;
+    
+    // Attempt to get the session/access token from common cookie names
+    const token = cookieStore.get('sb-access-token')?.value || 
+                  cookieStore.get('session')?.value ||
+                  cookieStore.get('supabase-auth-token')?.value;
 
-    if (!sessionCookie) {
+    if (!token) {
       return null;
     }
 
-    const decodedClaims = await auth.verifySessionCookie(sessionCookie);
-    const uid = decodedClaims.uid;
+    // Use the admin client to verify the user from the token
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
 
-    const userDoc = await db.collection('users').doc(uid).get();
+    if (error || !user) {
+      // If direct token verification fails, it might be a session cookie that needs different handling,
+      // but for standard Supabase JWTs, getUser(token) works.
+      return null;
+    }
 
-    if (!userDoc.exists) {
+    const uid = user.id;
+
+    // Fetch additional user data (like role) from the public users table
+    const { data: userData, error: userError } = await supabaseAdmin
+        .from('users')
+        .select('role')
+        .eq('id', uid)
+        .maybeSingle();
+
+    if (userError || !userData) {
+        // Fallback if user exists in Auth but not yet in public.users
         return { uid, role: 'USER' };
     }
 
-    const userData = userDoc.data();
-    return { uid, role: userData?.role || 'USER' };
+    return { uid, role: userData.role || 'USER' };
   } catch (error) {
     console.error('Error verifying server session:', error);
     return null;

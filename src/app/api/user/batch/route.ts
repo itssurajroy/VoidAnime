@@ -1,91 +1,69 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { db, auth } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 export async function POST(request: NextRequest) {
   try {
-    if (!db || !auth) {
+    if (!supabaseAdmin) {
       return NextResponse.json({ message: 'Server not configured' }, { status: 500 });
     }
 
     const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get('session')?.value;
+    const sessionCookie = cookieStore.get('sb-access-token')?.value || cookieStore.get('session')?.value;
 
     if (!sessionCookie) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    let decodedClaims;
-    try {
-      decodedClaims = await auth.verifySessionCookie(sessionCookie);
-    } catch {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(sessionCookie);
+    if (error || !user) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    const uid = decodedClaims.uid;
+    const uid = user.id;
     const body = await request.json();
     const { action, data } = body;
 
-    const userRef = db.collection('users').doc(uid);
-
     switch (action) {
       case 'clearHistory': {
-        const historyRef = userRef.collection('watchHistory');
-        const snapshot = await historyRef.limit(100).get();
+        const { error: deleteError, count } = await supabaseAdmin
+          .from('watch_history')
+          .delete({ count: 'exact' })
+          .eq('user_id', uid);
         
-        if (snapshot.empty) {
-          return NextResponse.json({ message: 'No history to clear', cleared: 0 });
-        }
-
-        const batch = db.batch();
-        snapshot.docs.forEach(doc => {
-          batch.delete(doc.ref);
-        });
-        await batch.commit();
+        if (deleteError) throw deleteError;
 
         return NextResponse.json({ 
           message: 'History cleared', 
-          cleared: snapshot.size 
+          cleared: count || 0 
         });
       }
 
       case 'clearFavorites': {
-        const favoritesRef = userRef.collection('favorites');
-        const snapshot = await favoritesRef.limit(100).get();
+        const { error: deleteError, count } = await supabaseAdmin
+          .from('favorites')
+          .delete({ count: 'exact' })
+          .eq('user_id', uid);
         
-        if (snapshot.empty) {
-          return NextResponse.json({ message: 'No favorites to clear', cleared: 0 });
-        }
-
-        const batch = db.batch();
-        snapshot.docs.forEach(doc => {
-          batch.delete(doc.ref);
-        });
-        await batch.commit();
+        if (deleteError) throw deleteError;
 
         return NextResponse.json({ 
           message: 'Favorites cleared', 
-          cleared: snapshot.size 
+          cleared: count || 0 
         });
       }
 
       case 'clearReviews': {
-        const reviewsRef = userRef.collection('reviews');
-        const snapshot = await reviewsRef.limit(100).get();
+        const { error: deleteError, count } = await supabaseAdmin
+          .from('reviews')
+          .delete({ count: 'exact' })
+          .eq('user_id', uid);
         
-        if (snapshot.empty) {
-          return NextResponse.json({ message: 'No reviews to clear', cleared: 0 });
-        }
-
-        const batch = db.batch();
-        snapshot.docs.forEach(doc => {
-          batch.delete(doc.ref);
-        });
-        await batch.commit();
+        if (deleteError) throw deleteError;
 
         return NextResponse.json({ 
           message: 'Reviews cleared', 
-          cleared: snapshot.size 
+          cleared: count || 0 
         });
       }
 
@@ -95,11 +73,16 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ message: 'Missing animeId or status' }, { status: 400 });
         }
 
-        const watchlistRef = userRef.collection('watchlist').doc(animeId);
-        await watchlistRef.update({
-          status,
-          updatedAt: new Date().toISOString(),
-        });
+        const { error: updateError } = await supabaseAdmin
+          .from('watchlist')
+          .update({
+            status,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', uid)
+          .eq('anime_id', animeId);
+
+        if (updateError) throw updateError;
 
         return NextResponse.json({ message: 'Status updated' });
       }
@@ -110,15 +93,16 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ message: 'Missing animeIds or status' }, { status: 400 });
         }
 
-        const batch = db.batch();
-        animeIds.forEach((animeId: string) => {
-          const docRef = userRef.collection('watchlist').doc(animeId);
-          batch.update(docRef, {
+        const { error: updateError } = await supabaseAdmin
+          .from('watchlist')
+          .update({
             status,
-            updatedAt: new Date().toISOString(),
-          });
-        });
-        await batch.commit();
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', uid)
+          .in('anime_id', animeIds);
+
+        if (updateError) throw updateError;
 
         return NextResponse.json({ 
           message: 'Bulk update complete', 
@@ -132,7 +116,13 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ message: 'Missing animeId' }, { status: 400 });
         }
 
-        await userRef.collection('watchlist').doc(animeId).delete();
+        const { error: deleteError } = await supabaseAdmin
+          .from('watchlist')
+          .delete()
+          .eq('user_id', uid)
+          .eq('anime_id', animeId);
+
+        if (deleteError) throw deleteError;
 
         return NextResponse.json({ message: 'Removed from watchlist' });
       }
@@ -143,7 +133,13 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ message: 'Missing animeId' }, { status: 400 });
         }
 
-        await userRef.collection('favorites').doc(animeId).delete();
+        const { error: deleteError } = await supabaseAdmin
+          .from('favorites')
+          .delete()
+          .eq('user_id', uid)
+          .eq('anime_id', animeId);
+
+        if (deleteError) throw deleteError;
 
         return NextResponse.json({ message: 'Removed from favorites' });
       }

@@ -5,14 +5,14 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { SidebarProvider, Sidebar, SidebarInset } from "@/components/ui/sidebar";
 import { AdminSidebar } from "@/components/admin/layout/Sidebar";
 import { AdminHeader } from "@/components/admin/layout/Header";
-import { useUser } from '@/firebase';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import { AuthTrigger } from '@/components/auth/AuthTrigger';
 import { Loader2 } from 'lucide-react';
 import type { UserRole } from '@/types/db';
 import { Button } from '@/components/ui/button';
 
 function AdminAuthContent({ children }: { children: React.ReactNode }) {
-  const { user, isUserLoading } = useUser();
+  const { user, loading: authLoading } = useSupabaseAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [showAuthDialog, setShowAuthDialog] = useState(false);
@@ -20,7 +20,7 @@ function AdminAuthContent({ children }: { children: React.ReactNode }) {
   const [userRole, setUserRole] = useState<string>('USER');
 
   useEffect(() => {
-    if (!isUserLoading) {
+    if (!authLoading) {
       if (!user) {
         if (searchParams.get('adminlogin') === 'true') {
           setShowAuthDialog(true);
@@ -32,7 +32,7 @@ function AdminAuthContent({ children }: { children: React.ReactNode }) {
         checkUserRole();
       }
     }
-  }, [isUserLoading, user, searchParams, router]);
+  }, [authLoading, user, searchParams, router]);
 
   const checkUserRole = async () => {
     try {
@@ -56,7 +56,7 @@ function AdminAuthContent({ children }: { children: React.ReactNode }) {
     }
   }, [isLoading, user, isAdmin, router]);
 
-  if (isLoading || isUserLoading) {
+  if (isLoading || authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -74,9 +74,9 @@ function AdminAuthContent({ children }: { children: React.ReactNode }) {
         <AdminSidebar userRole={userRole as UserRole} />
         <SidebarInset>
           <AdminHeader user={{
-            name: user.displayName || user.email?.split('@')[0] || 'Admin',
+            name: user.user_metadata?.username || user.email?.split('@')[0] || 'Admin',
             email: user.email || '',
-            avatarUrl: user.photoURL || undefined,
+            avatarUrl: user.user_metadata?.avatar_url || undefined,
             role: userRole as UserRole,
           }} />
           <main className="p-4 lg:p-6">

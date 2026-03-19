@@ -11,13 +11,27 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
-import { useNotifications } from '@/hooks/use-notifications';
-import { markAsRead, markAllAsRead, deleteNotification } from '@/actions/notifications';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
+import { createBrowserClient } from "@supabase/ssr";
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
-import { useUser } from '@/firebase';
 import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!
+);
+
+interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  message: string | null;
+  data: Record<string, unknown>;
+  is_read: boolean;
+  created_at: string;
+}
 
 const NotificationIcon = ({ type }: { type: string }) => {
   switch (type) {
@@ -30,27 +44,72 @@ const NotificationIcon = ({ type }: { type: string }) => {
 };
 
 export function NotificationBell() {
-  const { user } = useUser();
-  const { notifications, unreadCount, loading } = useNotifications();
+  const { user } = useSupabaseAuth();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  useEffect(() => {
+    if (!user) {
+      setNotifications([]);
+      setUnreadCount(0);
+      setLoading(false);
+      return;
+    }
+
+    const fetchNotifications = async () => {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (!error && data) {
+        setNotifications(data);
+        setUnreadCount(data.filter((n: Notification) => !n.is_read).length);
+      }
+      setLoading(false);
+    };
+
+    fetchNotifications();
+  }, [user]);
+
   const handleMarkAsRead = async (id: string) => {
-    await markAsRead(id);
+    await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('id', id);
+    
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    setUnreadCount(prev => Math.max(0, prev - 1));
   };
 
   const handleMarkAllAsRead = async () => {
     if (!user) return;
-    await markAllAsRead(user.uid);
+    await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('user_id', user.id)
+      .eq('is_read', false);
+    
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    setUnreadCount(0);
   };
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     e.preventDefault();
-    await deleteNotification(id);
+    await supabase
+      .from('notifications')
+      .delete()
+      .eq('id', id);
+    setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
   return (
@@ -99,16 +158,16 @@ export function NotificationBell() {
                 asChild
                 className={cn(
                   "relative flex gap-4 p-4 rounded-sm mb-1 cursor-pointer transition-all border border-transparent focus:bg-white/5",
-                  notification.isRead ? "opacity-60 grayscale-[0.5]" : "bg-white/[0.03] border-white/5"
+                  notification.is_read ? "opacity-60 grayscale-[0.5]" : "bg-white/[0.03] border-white/5"
                 )}
                 onClick={() => handleMarkAsRead(notification.id)}
               >
-                <Link href={notification.link || '#'}>
+                <Link href={notification.data?.link as string || '#'}>
                   <div className="relative shrink-0">
                     <Avatar className="w-10 h-10 rounded-sm border border-white/5">
-                      <AvatarImage src={notification.senderAvatar || ''} />
+                      <AvatarImage src={notification.data?.senderAvatar as string || undefined} />
                       <AvatarFallback className="bg-white/5 text-[10px] font-black uppercase text-white/40">
-                        {notification.senderName?.charAt(0) || 'V'}
+                        {String(notification.data?.senderName || 'V').charAt(0)}
                       </AvatarFallback>
                     </Avatar>
                     <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-[#1a1b1e] rounded-full border border-white/5 flex items-center justify-center">
@@ -121,11 +180,11 @@ export function NotificationBell() {
                         {notification.title}
                       </p>
                       <span className="text-[8px] font-black text-white/20 uppercase tracking-widest tabular-nums whitespace-nowrap pt-0.5">
-                        {mounted ? formatDistanceToNow(new Date(notification.createdAt), { addSuffix: true }) : '...'}
+                        {mounted ? formatDistanceToNow(new Date(notification.created_at), { addSuffix: true }) : '...'}
                       </span>
                     </div>
                     <p className="text-[10px] text-white/40 line-clamp-2 leading-relaxed">
-                      {notification.content}
+                      {notification.message}
                     </p>
                   </div>
                   <button 

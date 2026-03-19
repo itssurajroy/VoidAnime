@@ -1,8 +1,9 @@
 'use server';
 
-import { db } from '@/lib/firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { supabaseAdmin as _supabaseAdmin } from '@/lib/supabase-admin';
 import { Notification, NotificationType } from '@/types/db';
+
+const supabaseAdmin = _supabaseAdmin!;
 
 export async function createNotification(data: {
   recipientId: string;
@@ -15,12 +16,20 @@ export async function createNotification(data: {
   link?: string | null;
 }) {
   try {
-    if (!db) return { success: false, error: 'Firebase Admin not initialized' };
-    await db.collection('notifications').add({
-      ...data,
-      isRead: false,
-      createdAt: FieldValue.serverTimestamp(),
+    const { error } = await supabaseAdmin.from('notifications').insert({
+      user_id: data.recipientId,
+      sender_id: data.senderId,
+      sender_name: data.senderName,
+      sender_avatar: data.senderAvatar,
+      type: data.type,
+      title: data.title,
+      message: data.content,
+      link: data.link,
+      is_read: false,
+      created_at: new Date().toISOString(),
     });
+
+    if (error) throw error;
     return { success: true };
   } catch (error) {
     console.error('Error creating notification:', error);
@@ -30,21 +39,27 @@ export async function createNotification(data: {
 
 export async function getNotifications(userId: string, max: number = 20) {
   try {
-    if (!db) return { success: false, error: 'Firebase Admin not initialized' };
-    const snapshot = await db.collection('notifications')
-      .where('recipientId', '==', userId)
-      .orderBy('createdAt', 'desc')
-      .limit(max)
-      .get();
+    const { data, error } = await supabaseAdmin.from('notifications')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(max);
 
-    const notifications = snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        createdAt: data.createdAt?.toDate?.() || new Date(data.createdAt || Date.now()),
-      };
-    }) as Notification[];
+    if (error) throw error;
+
+    const notifications = (data || []).map(item => ({
+      id: item.id,
+      recipientId: item.user_id,
+      senderId: item.sender_id,
+      senderName: item.sender_name,
+      senderAvatar: item.sender_avatar,
+      type: item.type as NotificationType,
+      title: item.title,
+      content: item.message,
+      link: item.link,
+      isRead: item.is_read,
+      createdAt: new Date(item.created_at),
+    })) as Notification[];
 
     return { success: true, notifications };
   } catch (error) {
@@ -55,8 +70,12 @@ export async function getNotifications(userId: string, max: number = 20) {
 
 export async function markAsRead(notificationId: string) {
   try {
-    if (!db) return { success: false, error: 'Firebase Admin not initialized' };
-    await db.collection('notifications').doc(notificationId).update({ isRead: true });
+    const { error } = await supabaseAdmin
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('id', notificationId);
+    
+    if (error) throw error;
     return { success: true };
   } catch (error) {
     console.error('Error marking notification as read:', error);
@@ -66,18 +85,13 @@ export async function markAsRead(notificationId: string) {
 
 export async function markAllAsRead(userId: string) {
   try {
-    if (!db) return { success: false, error: 'Firebase Admin not initialized' };
-    const snapshot = await db.collection('notifications')
-      .where('recipientId', '==', userId)
-      .where('isRead', '==', false)
-      .get();
+    const { error } = await supabaseAdmin
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('user_id', userId)
+      .eq('is_read', false);
 
-    const batch = db.batch();
-    snapshot.docs.forEach(doc => {
-      batch.update(doc.ref, { isRead: true });
-    });
-    await batch.commit();
-
+    if (error) throw error;
     return { success: true };
   } catch (error) {
     console.error('Error marking all notifications as read:', error);
@@ -87,8 +101,12 @@ export async function markAllAsRead(userId: string) {
 
 export async function deleteNotification(notificationId: string) {
   try {
-    if (!db) return { success: false, error: 'Firebase Admin not initialized' };
-    await db.collection('notifications').doc(notificationId).delete();
+    const { error } = await supabaseAdmin
+      .from('notifications')
+      .delete()
+      .eq('id', notificationId);
+    
+    if (error) throw error;
     return { success: true };
   } catch (error) {
     console.error('Error deleting notification:', error);

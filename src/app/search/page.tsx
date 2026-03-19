@@ -30,12 +30,15 @@ export default async function SearchPage({
   if (resolvedSearchParams.end_date) filterParams.end_date = resolvedSearchParams.end_date as string;
 
   try {
-    const { data } = await searchAnime(query || '', filterParams);
-    const { animes, currentPage, totalPages } = data;
-    const totalAnimes = data.totalAnimes ?? animes.length;
+    const res: any = await searchAnime(query || '', page);
+    const data = res?.data?.data || res?.data || { animes: [], currentPage: 1, totalPages: 1, hasNextPage: false };
+    const animes = data.data || data.animes || [];
+    const currentPage = data.currentPage || 1;
+    const totalPages = data.totalPages || data.lastPage || 1;
+    const totalAnimes = data.totalResults || animes.length;
 
     const params = new URLSearchParams();
-    Object.entries(searchParams).forEach(([key, value]) => {
+    Object.entries(resolvedSearchParams).forEach(([key, value]) => {
       if (Array.isArray(value)) {
         value.forEach((v) => params.append(key, v));
       } else if (value !== undefined) {

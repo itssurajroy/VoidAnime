@@ -2,8 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useUser, useAuth } from '@/firebase';
-import { signOut } from 'firebase/auth';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -13,8 +12,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Loader2, LogOut, Trash2, Download, AlertTriangle } from 'lucide-react';
 
 export function DangerZone() {
-  const { user } = useUser();
-  const auth = useAuth();
+  const { user, signOut } = useSupabaseAuth();
   const router = useRouter();
   const { toast } = useToast();
   const [confirmText, setConfirmText] = useState('');
@@ -22,10 +20,8 @@ export function DangerZone() {
   const [isExporting, setIsExporting] = useState(false);
 
   const handleLogout = async () => {
-    if (auth) {
-      await signOut(auth);
-      router.push('/');
-    }
+    await signOut();
+    router.push('/');
   };
 
   const handleDeleteAccount = async () => {
@@ -46,11 +42,8 @@ export function DangerZone() {
         description: 'Your account has been permanently deleted.',
       });
 
-      if (auth) {
-        await signOut(auth);
-      }
       router.push('/');
-    } catch {
+    } catch (error) {
       toast({
         variant: 'destructive',
         title: 'Error',
@@ -64,31 +57,27 @@ export function DangerZone() {
   const handleExportData = async () => {
     setIsExporting(true);
     try {
-      const res = await fetch('/api/user/export', {
-        method: 'POST',
-      });
+      const res = await fetch('/api/user/export');
 
       if (!res.ok) {
         throw new Error('Failed to export data');
       }
 
-      const data = await res.json();
-      
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `user-data-${user?.email || 'export'}.json`;
+      a.download = 'voidanime-data.json';
       document.body.appendChild(a);
       a.click();
+      window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
+
       toast({
-        title: 'Success',
-        description: 'Your data has been exported.',
+        title: 'Export Complete',
+        description: 'Your data has been downloaded.',
       });
-    } catch {
+    } catch (error) {
       toast({
         variant: 'destructive',
         title: 'Error',
@@ -99,101 +88,97 @@ export function DangerZone() {
     }
   };
 
+  if (!user) return null;
+
   return (
-    <div className="space-y-10">
-      <Card className="glass-panel rounded-[40px] border-none saas-shadow overflow-hidden group">
-        <CardHeader className="bg-yellow-500/5 px-10 py-8 border-b border-yellow-500/10">
-          <CardTitle className="text-xl font-black text-yellow-500 uppercase tracking-wider flex items-center gap-3">
-            <LogOut className="w-6 h-6" />
-            Active Session
+    <div className="space-y-8">
+      <Card className="bg-white/5 border-white/10">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <LogOut className="w-5 h-5" />
+            Sign Out
           </CardTitle>
-          <CardDescription className="text-white/30 text-[10px] font-bold uppercase tracking-widest mt-1">Disconnect your account from this device</CardDescription>
+          <CardDescription>
+            Sign out of your account on this device.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="p-10">
-          <Button variant="outline" onClick={handleLogout} className="h-12 rounded-2xl border-yellow-500/20 text-yellow-500/60 hover:bg-yellow-500 hover:text-black transition-all px-8 uppercase font-black text-[10px] tracking-[0.2em]">
-            Sign Out from This Device
+        <CardContent>
+          <Button variant="outline" onClick={handleLogout}>
+            Sign Out
           </Button>
         </CardContent>
       </Card>
 
-      <Card className="glass-panel rounded-[40px] border-none saas-shadow overflow-hidden group">
-        <CardHeader className="bg-blue-500/5 px-10 py-8 border-b border-blue-500/10">
-          <CardTitle className="text-xl font-black text-blue-400 uppercase tracking-wider flex items-center gap-3">
-            <Download className="w-6 h-6" />
-            Data Export
+      <Card className="bg-white/5 border-white/10">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Download className="w-5 h-5" />
+            Export Data
           </CardTitle>
-          <CardDescription className="text-white/30 text-[10px] font-bold uppercase tracking-widest mt-1">Download a local backup of your account data</CardDescription>
+          <CardDescription>
+            Download all your data including watchlist, history, and favorites.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="p-10">
-          <Button variant="outline" onClick={handleExportData} disabled={isExporting} className="h-12 rounded-2xl border-blue-500/20 text-blue-400/60 hover:bg-blue-500 hover:text-black transition-all px-8 uppercase font-black text-[10px] tracking-[0.2em]">
+        <CardContent>
+          <Button variant="outline" onClick={handleExportData} disabled={isExporting}>
             {isExporting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Download Data
+            Export My Data
           </Button>
         </CardContent>
       </Card>
 
-      <Card className="bg-red-500/[0.02] rounded-[40px] border border-red-500/10 saas-shadow overflow-hidden">
-        <CardHeader className="bg-red-500/5 px-10 py-8 border-b border-red-500/10">
-          <CardTitle className="text-xl font-black text-red-400 uppercase tracking-wider flex items-center gap-3">
-            <Trash2 className="w-6 h-6" />
-            Account Deletion
-          </CardTitle>
-          <CardDescription className="text-red-400/40 text-[10px] font-bold uppercase tracking-widest mt-1">Irreversible account and data deletion</CardDescription>
-        </CardHeader>
-        <CardContent className="p-10 space-y-8">
-          <div className="p-8 bg-red-500/5 rounded-3xl border border-red-500/10">
-            <p className="text-xs text-red-400/60 font-black uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-               <AlertTriangle className="w-4 h-4" />
-               Warning: Critical Action
-            </p>
-            <ul className="text-xs text-white/30 font-medium space-y-2 list-none">
-              <li className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-red-500/40" /> All watch history will be purged</li>
-              <li className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-red-500/40" /> Profile and bio will be erased</li>
-              <li className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-red-500/40" /> All comments will be anonymized</li>
-              <li className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-red-500/40" /> This action cannot be reversed</li>
-            </ul>
-          </div>
-          
-          <div className="space-y-3">
-            <Label className="text-[10px] font-black text-red-400/40 uppercase tracking-[0.3em] ml-1">Type DELETE to authorize</Label>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Card className="bg-red-950/20 border-red-900/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-red-400">
+                <Trash2 className="w-5 h-5" />
+                Delete Account
+              </CardTitle>
+              <CardDescription className="text-red-300/60">
+                Permanently delete your account and all associated data.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button variant="destructive">
+                Delete Account
+              </Button>
+            </CardContent>
+          </Card>
+        </AlertDialogTrigger>
+        <AlertDialogContent className="bg-[#0B0C10] border-white/10">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription className="text-white/60">
+              This action cannot be undone. This will permanently delete your account
+              and remove all your data from our servers.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-4">
+            <Label htmlFor="confirm-delete" className="text-white">
+              Type <span className="font-bold text-red-400">DELETE</span> to confirm
+            </Label>
             <Input
+              id="confirm-delete"
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
               placeholder="DELETE"
-              className="h-14 bg-red-500/5 border-red-500/10 rounded-2xl text-red-400 font-black tracking-[0.5em] text-center focus:ring-red-500/20"
+              className="mt-2 bg-white/5 border-white/10"
             />
           </div>
-
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="destructive" disabled={confirmText !== 'DELETE'} className="w-full h-14 rounded-full font-black uppercase tracking-[0.2em] shadow-2xl shadow-red-500/20 active:scale-95 transition-all text-xs">
-                Delete Account Forever
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent className="bg-card border-white/5 rounded-[32px] p-10 max-w-md">
-              <AlertDialogHeader className="space-y-4">
-                <AlertDialogTitle className="text-2xl font-black text-white uppercase tracking-tighter text-center">Are you sure?</AlertDialogTitle>
-                <AlertDialogDescription className="text-white/40 text-center font-medium leading-relaxed">
-                  This action is irreversible. Your entire history and identity will be permanently removed from VoidAnime.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter className="flex-col sm:flex-col gap-3 mt-8">
-                <AlertDialogAction
-                  onClick={handleDeleteAccount}
-                  className="bg-red-500 hover:bg-red-600 text-white font-black rounded-2xl h-12 uppercase text-[11px] tracking-widest border-none shadow-xl shadow-red-500/20"
-                  disabled={isDeleting}
-                >
-                  {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Confirm Deletion
-                </AlertDialogAction>
-                <AlertDialogCancel className="bg-white/5 border-white/5 text-white/40 hover:bg-white/10 hover:text-white rounded-2xl h-12 uppercase font-black text-[11px] tracking-widest mt-0">
-                  Abort
-                </AlertDialogCancel>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </CardContent>
-      </Card>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-white/10 text-white hover:bg-white/20">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteAccount}
+              disabled={confirmText !== 'DELETE' || isDeleting}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete Account
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

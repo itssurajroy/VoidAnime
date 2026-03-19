@@ -1,6 +1,8 @@
-import { db } from '@/lib/firebase-admin';
+import { supabaseAdmin as _supabaseAdmin } from '@/lib/supabase-admin';
 import type { SiteConfig as AppSiteConfig, NavLink as AppNavLink, SocialLink as AppSocialLink, NavLink, SocialLink } from '@/types/site';
 import type { NavLink as DbNavLink } from '@/types/db';
+
+const supabaseAdmin = _supabaseAdmin!;
 
 export type SiteConfig = AppSiteConfig;
 
@@ -8,8 +10,8 @@ const COLLECTION = 'site_config';
 const DOC_ID = 'default';
 
 const DEFAULT_CONFIG: SiteConfig = {
-  siteName: 'VoidAnime',
-  tagline: 'Watch Anime Online in HD',
+  siteName: process.env.NEXT_PUBLIC_SITE_NAME || 'VoidAnime',
+  tagline: process.env.NEXT_PUBLIC_SITE_TAGLINE || 'Watch Anime Online in HD',
   logoUrl: '/logo.png',
   faviconUrl: '/favicon.ico',
   theme: {
@@ -65,14 +67,26 @@ function hydrateConfig(data: any): SiteConfig {
 }
 
 export async function getSiteConfig(): Promise<SiteConfig> {
-    if (!db) return DEFAULT_CONFIG;
+    if (!supabaseAdmin) return DEFAULT_CONFIG;
     try {
-        const doc = await db.collection(COLLECTION).doc(DOC_ID).get();
-        if (!doc.exists) {
-            await db.collection(COLLECTION).doc(DOC_ID).set(DEFAULT_CONFIG);
+        const { data, error } = await supabaseAdmin
+            .from(COLLECTION)
+            .select('*')
+            .eq('id', DOC_ID)
+            .maybeSingle();
+
+        if (error) {
+            console.error('Error fetching site config:', error);
+            return DEFAULT_CONFIG;
+        }
+
+        if (!data) {
+            await supabaseAdmin
+                .from(COLLECTION)
+                .upsert({ id: DOC_ID, ...DEFAULT_CONFIG });
             return hydrateConfig(DEFAULT_CONFIG);
         }
-        return hydrateConfig(doc.data());
+        return hydrateConfig(data);
     } catch (e) {
         console.error('Error fetching site config:', e);
         return DEFAULT_CONFIG;
@@ -90,27 +104,39 @@ export async function getRawSocialLinks(): Promise<DbNavLink[]> {
 }
 
 export async function updateConfig(newConfig: Partial<Omit<SiteConfig, 'theme' | 'announcement' | 'header' | 'footer'>>) {
-    if (!db) return;
-    await db.collection(COLLECTION).doc(DOC_ID).set(newConfig, { merge: true });
+    if (!supabaseAdmin) return;
+    const { error } = await supabaseAdmin
+        .from(COLLECTION)
+        .upsert({ id: DOC_ID, ...newConfig });
+    if (error) console.error('Error updating config:', error);
 }
 
 export async function updateTheme(theme: Partial<SiteConfig['theme']>) {
-    if (!db) return;
-    await db.collection(COLLECTION).doc(DOC_ID).set({ theme }, { merge: true });
+    if (!supabaseAdmin) return;
+    const { error } = await supabaseAdmin
+        .from(COLLECTION)
+        .upsert({ id: DOC_ID, theme });
+    if (error) console.error('Error updating theme:', error);
 }
 
 export async function updateAnnouncement(announcement: Partial<SiteConfig['announcement']>) {
-    if (!db) return;
-    await db.collection(COLLECTION).doc(DOC_ID).set({ announcement }, { merge: true });
+    if (!supabaseAdmin) return;
+    const { error } = await supabaseAdmin
+        .from(COLLECTION)
+        .upsert({ id: DOC_ID, announcement });
+    if (error) console.error('Error updating announcement:', error);
 }
 
 export async function updateShareStats(stats: Partial<NonNullable<SiteConfig['shareStats']>>) {
-    if (!db) return;
-    await db.collection(COLLECTION).doc(DOC_ID).set({ shareStats: stats }, { merge: true });
+    if (!supabaseAdmin) return;
+    const { error } = await supabaseAdmin
+        .from(COLLECTION)
+        .upsert({ id: DOC_ID, shareStats: stats });
+    if (error) console.error('Error updating share stats:', error);
 }
 
 export async function saveNavLink(link: Omit<AppNavLink, 'id' | 'order'> & {id?: number}) {
-    if (!db) return;
+    if (!supabaseAdmin) return;
     const config = await getSiteConfig();
     const navLinks = [...config.navLinks];
     
@@ -124,18 +150,24 @@ export async function saveNavLink(link: Omit<AppNavLink, 'id' | 'order'> & {id?:
         navLinks.push({ ...link, id: newId } as NavLink);
     }
     
-    await db.collection(COLLECTION).doc(DOC_ID).update({ navLinks });
+    const { error } = await supabaseAdmin
+        .from(COLLECTION)
+        .upsert({ id: DOC_ID, navLinks });
+    if (error) console.error('Error saving nav link:', error);
 }
 
 export async function deleteNavLink(id: number) {
-    if (!db) return;
+    if (!supabaseAdmin) return;
     const config = await getSiteConfig();
     const navLinks = config.navLinks.filter((l: NavLink) => l.id !== id);
-    await db.collection(COLLECTION).doc(DOC_ID).update({ navLinks });
+    const { error } = await supabaseAdmin
+        .from(COLLECTION)
+        .upsert({ id: DOC_ID, navLinks });
+    if (error) console.error('Error deleting nav link:', error);
 }
 
 export async function saveSocialLink(link: Omit<AppSocialLink, 'id' | 'order'> & {id?: number}) {
-    if (!db) return;
+    if (!supabaseAdmin) return;
     const config = await getSiteConfig();
     const socialLinks = [...config.socialLinks];
     
@@ -149,18 +181,24 @@ export async function saveSocialLink(link: Omit<AppSocialLink, 'id' | 'order'> &
         socialLinks.push({ ...link, id: newId } as SocialLink);
     }
     
-    await db.collection(COLLECTION).doc(DOC_ID).update({ socialLinks });
+    const { error } = await supabaseAdmin
+        .from(COLLECTION)
+        .upsert({ id: DOC_ID, socialLinks });
+    if (error) console.error('Error saving social link:', error);
 }
 
 export async function deleteSocialLink(id: number) {
-    if (!db) return;
+    if (!supabaseAdmin) return;
     const config = await getSiteConfig();
     const socialLinks = config.socialLinks.filter((l: SocialLink) => l.id !== id);
-    await db.collection(COLLECTION).doc(DOC_ID).update({ socialLinks });
+    const { error } = await supabaseAdmin
+        .from(COLLECTION)
+        .upsert({ id: DOC_ID, socialLinks });
+    if (error) console.error('Error deleting social link:', error);
 }
 
 export async function saveCryptoDonation(donation: any) {
-    if (!db) return;
+    if (!supabaseAdmin) return;
     const config = await getSiteConfig();
     const cryptoDonations = [...(config.cryptoDonations || [])];
     
@@ -174,12 +212,18 @@ export async function saveCryptoDonation(donation: any) {
         cryptoDonations.push({ ...donation, id: newId });
     }
     
-    await db.collection(COLLECTION).doc(DOC_ID).update({ cryptoDonations });
+    const { error } = await supabaseAdmin
+        .from(COLLECTION)
+        .upsert({ id: DOC_ID, cryptoDonations });
+    if (error) console.error('Error saving crypto donation:', error);
 }
 
 export async function deleteCryptoDonation(id: string) {
-    if (!db) return;
+    if (!supabaseAdmin) return;
     const config = await getSiteConfig();
     const cryptoDonations = (config.cryptoDonations || []).filter((d: any) => d.id !== id);
-    await db.collection(COLLECTION).doc(DOC_ID).update({ cryptoDonations });
+    const { error } = await supabaseAdmin
+        .from(COLLECTION)
+        .upsert({ id: DOC_ID, cryptoDonations });
+    if (error) console.error('Error deleting crypto donation:', error);
 }

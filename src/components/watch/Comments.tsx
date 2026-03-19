@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useComments } from '@/hooks/useComments';
-import { useUser } from '@/firebase';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import { formatDistanceToNow } from 'date-fns';
 import { MessageCircle, Send, Trash2, Edit2, Loader2, Heart, Reply, MoreHorizontal, Smile, ShieldAlert, XCircle } from 'lucide-react';
 import { useUserRole } from '@/hooks/useUserRole';
@@ -35,7 +35,7 @@ interface CommentsSectionProps {
 }
 
 export function CommentsSection({ animeId, animeTitle }: CommentsSectionProps) {
-  const { user } = useUser();
+  const { user } = useSupabaseAuth();
   const { comments, loading, addComment, deleteComment, updateComment, likeComment, spamError, setSpamError } = useComments(animeId);
   const [newComment, setNewComment] = useState('');
   const [replyTo, setReplyTo] = useState<string | null>(null);
@@ -162,10 +162,10 @@ export function CommentsSection({ animeId, animeTitle }: CommentsSectionProps) {
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-2xl border border-white/5">
                     <Avatar className="w-7 h-7 border border-white/10 shadow-lg">
-                      <AvatarImage src={user.photoURL || ''} />
-                      <AvatarFallback className="bg-primary/20 text-primary text-[9px] font-black">{user.displayName?.charAt(0)}</AvatarFallback>
+                      <AvatarImage src={user.user_metadata?.avatar_url || undefined} />
+                      <AvatarFallback className="bg-primary/20 text-primary text-[9px] font-black">{user.user_metadata?.username?.charAt(0)}</AvatarFallback>
                     </Avatar>
-                    <span className="text-[10px] font-black text-white/40 uppercase tracking-widest truncate max-w-[150px] hidden sm:inline">Signed in as {user.displayName}</span>
+                    <span className="text-[10px] font-black text-white/40 uppercase tracking-widest truncate max-w-[150px] hidden sm:inline">Signed in as {user.user_metadata?.username}</span>
                   </div>
 
                   <DropdownMenu>
@@ -240,7 +240,7 @@ export function CommentsSection({ animeId, animeTitle }: CommentsSectionProps) {
                   <div className="shrink-0 pt-1">
                     <div className="relative">
                       <Avatar className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl border-2 border-white/5 shadow-2xl transition-transform group-hover:scale-105">
-                        <AvatarImage src={comment.userAvatar || ''} />
+                        <AvatarImage src={comment.userAvatar || undefined} />
                         <AvatarFallback className="bg-white/5 text-white/20 font-black text-lg">{comment.userName?.charAt(0)}</AvatarFallback>
                       </Avatar>
                       <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-lg bg-emerald-500/20 border-2 border-[#0B0C10] flex items-center justify-center">
@@ -258,7 +258,7 @@ export function CommentsSection({ animeId, animeTitle }: CommentsSectionProps) {
                         </Link>
                         <div className="w-1.5 h-1.5 rounded-full bg-white/5" />
                         <span className="text-[10px] font-bold text-white/20 uppercase tracking-[0.1em]">
-                          {formatDistanceToNow(comment.createdAt?.toDate() || new Date())} ago
+                          {formatDistanceToNow(new Date(comment.createdAt || Date.now()))} ago
                         </span>
                         {comment.editCount && comment.editCount > 0 && (
                           <span className="text-[9px] font-black text-primary/40 uppercase tracking-widest italic font-serif">Edited</span>
@@ -272,7 +272,7 @@ export function CommentsSection({ animeId, animeTitle }: CommentsSectionProps) {
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="bg-background border-white/10 rounded-2xl p-2 min-w-[160px] backdrop-blur-3xl shadow-2xl">
-                          {(user?.uid === comment.userId || isAdmin) && (
+                          {(user?.id === comment.userId || isAdmin) && (
                             <>
                               <DropdownMenuItem className="rounded-xl focus:bg-white/5 transition-all text-[10px] font-black uppercase tracking-widest py-3 cursor-pointer">
                                 <Edit2 className="w-3.5 h-3.5 mr-3 text-blue-400" /> Edit Comment

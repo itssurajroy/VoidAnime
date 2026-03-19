@@ -278,6 +278,7 @@ export interface GenreCategoryData {
   genres?: string[];
   genreName?: string;
   categoryName?: string;
+  producerName?: string;
   topAiringAnimes?: AnimeCard[];
   currentPage: number;
   totalPages: number;
@@ -498,4 +499,265 @@ export interface WatchlistItem extends AnimeCard {
   status: WatchlistStatus;
   progress: number; // episodes watched
   totalEpisodes: number;
+}
+
+/* =========================
+   KENJITSU API TYPES
+   (Kaido, HiAnime, AnimePahe, Anizone)
+========================= */
+
+export type AnimeProvider = 'kaido' | 'hianime' | 'animepahe' | 'anizone';
+
+export interface KaidoHomeData {
+  data: SpotlightAnime[];
+  trending: RankedAnime[];
+  topAiring: AnimeCard[];
+  mostPopular: AnimeCard[];
+  favourites: AnimeCard[];
+  recentlyCompleted: AnimeCard[];
+  recentlyUpdated: AnimeCard[];
+  recentlyAdded: AnimeCard[];
+  topAnime: {
+    daily: AnimeCard[];
+    weekly: AnimeCard[];
+    monthly: AnimeCard[];
+  };
+  topUpcoming: AnimeCard[];
+}
+
+export interface KaidoAnimeDetails {
+  data: {
+    id: string;
+    name: string;
+    japanese: string;
+    romaji: string;
+    quality: string;
+    rating: string;
+    producers: string;
+    altnames: string;
+    releaseDate: string;
+    status: string;
+    score: string;
+    anilistId: number;
+    malId: number;
+    posterImage: string;
+    genres: string[];
+    studios: string[];
+    synopsis: string;
+    episodes: { dub: number; sub: number };
+    totalEpisodes: number;
+    type: string;
+    duration: string;
+  };
+  providerEpisodes: KaidoEpisode[];
+  characters: KaidoCharacter[];
+  recommendedAnime: AnimeCard[];
+  relatedAnime: AnimeCard[];
+  mostPopular: AnimeCard[];
+  relatedSeasons: KaidoRelatedSeason[];
+  promotionVideos: KaidoPromotionVideo[];
+}
+
+export interface KaidoEpisode {
+  episodeId: string;
+  title: string;
+  romaji: string;
+  episodeNumber: number;
+}
+
+export interface KaidoCharacter {
+  id: string;
+  name: string;
+  posterImage: string;
+  role: string;
+  voiceActor: {
+    id: string;
+    name: string;
+    posterImage: string;
+    language: string;
+  };
+}
+
+export interface KaidoRelatedSeason {
+  id: string;
+  name: string;
+  season: string;
+  seasonPoster: string;
+}
+
+export interface KaidoPromotionVideo {
+  url: string;
+  title: string;
+  thumbnail: string;
+}
+
+export interface KaidoSource {
+  headers: {
+    Referer: string;
+  };
+  data: {
+    intro: { start: number; end: number };
+    outro: { start: number; end: number };
+    subtitles: KaidoSubtitle[];
+    sources: KaidoStreamSource[];
+  };
+  syncData: {
+    anilistId: number;
+    malId: number;
+    name: string;
+  };
+}
+
+export interface KaidoSubtitle {
+  file: string;
+  label: string;
+  kind: string;
+  default: boolean;
+}
+
+export interface KaidoStreamSource {
+  url: string;
+  isM3u8: boolean;
+  type: string;
+}
+
+export interface KaidoSearchResult {
+  hasNextPage: boolean;
+  currentPage: number;
+  lastPage: number;
+  data: AnimeCard[];
+}
+
+export interface KaidoGenreResult {
+  hasNextPage: boolean;
+  currentPage: number;
+  lastPage: number;
+  data: AnimeCard[];
+}
+
+export interface KaidoEpisodeServers {
+  data: {
+    sub: { serverId: number; serverName: string; mediaId: string }[];
+    dub: { serverId: number; serverName: string; mediaId: string }[];
+    raw: { serverId: number; serverName: string; mediaId: string }[];
+    episodeNumber: number;
+  };
+}
+
+/* =========================
+   ANILIST VIA KENJITSU
+========================= */
+
+export interface AnilistSearchResult {
+  hasNextPage: boolean;
+  currentPage: number;
+  total: number;
+  lastPage: number;
+  perPage: number;
+  data: AnilistMedia[];
+}
+
+export interface AnilistMedia {
+  malId: number;
+  anilistId: number;
+  image: string;
+  color: string;
+  bannerImage: string;
+  title: {
+    romaji: string;
+    english: string | null;
+    native: string;
+  };
+  trailer: {
+    id: string | null;
+    site: string | null;
+    thumbnail: string | null;
+  };
+  format: string;
+  status: string;
+  duration: number | null;
+  score: number;
+  genres: string[];
+  episodes: number | null;
+  synopsis: string;
+  season: string | null;
+  releaseDate: string | null;
+  endDate: string | null;
+  studio: string | null;
+  producers: string[];
+}
+
+export interface AnilistCharacter {
+  malId: number;
+  anilistId: number;
+  title: {
+    romaji: string;
+    english: string | null;
+    native: string;
+  };
+  characters: {
+    role: string;
+    id: number;
+    name: string;
+    image: string;
+    voiceActors: {
+      name: string;
+      language: string;
+      image: string;
+    }[];
+  }[];
+}
+
+export interface AnilistRelated {
+  data: {
+    anilistId: number;
+    malId: number;
+    title: {
+      romaji: string;
+      english: string | null;
+      native: string;
+    };
+    type: string;
+    score: number;
+    image: string;
+    bannerImage: string;
+    color: string;
+  }[];
+}
+
+export interface AnilistAiringSchedule {
+  hasNextPage: boolean;
+  currentPage: number;
+  total: number;
+  lastPage: number;
+  perPage: number;
+  data: {
+    malId: number;
+    anilistId: number;
+    bannerImage: string;
+    image: string;
+    color: string;
+    title: {
+      romaji: string;
+      english: string | null;
+      native: string | null;
+    };
+    format: string;
+    status: string;
+    popularity: number;
+    score: number;
+    genres: string[];
+    episodes: number;
+    duration: number;
+    synopsis: string;
+    season: string;
+    releaseDate: string;
+    endDate: string;
+    nextAiringEpisode: {
+      episode: number;
+      id: number;
+      airingAt: number;
+      timeUntilAiring: number;
+    };
+  }[];
 }

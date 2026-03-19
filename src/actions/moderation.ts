@@ -1,47 +1,38 @@
 'use server';
 
-import { db } from '@/lib/firebase-admin';
 import { revalidatePath } from 'next/cache';
 import type { ReportStatus, ReportCategory, ReportTargetType, Report, Comment, User } from '@/types/db';
+import { supabaseAdmin as _supabaseAdmin } from '@/lib/supabase-admin';
+
+const supabaseAdmin = _supabaseAdmin!;
 
 export async function getReports(
   status?: ReportStatus,
   page: number = 1,
   limit: number = 20
 ): Promise<{ reports: Report[]; total: number; totalPages: number }> {
-  if (!db) {
+  if (!supabaseAdmin) {
     return { reports: [], total: 0, totalPages: 0 };
   }
 
   try {
-    let query: any = db.collection('reports');
+    let query = supabaseAdmin
+      .from('reports')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
     
     if (status) {
-      query = query.where('status', '==', status);
+      query = query.eq('status', status);
     }
 
-    const snapshot = await query
-      .orderBy('createdAt', 'desc')
-      .limit(limit)
-      .offset((page - 1) * limit)
-      .get();
+    const { data, count, error } = await query;
 
-    const countQuery = status 
-      ? await db.collection('reports').where('status', '==', status).count().get()
-      : await db.collection('reports').count().get();
+    if (error) throw error;
 
-    const total = countQuery.data().count || 0;
+    const total = count || 0;
     const totalPages = Math.ceil(total / limit);
-
-    const reports = snapshot.docs.map((doc: any) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        createdAt: data.createdAt?.toDate?.() || data.createdAt,
-        updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
-      } as Report;
-    });
+    const reports = (data || []) as Report[];
 
     return { reports, total, totalPages };
   } catch (error) {
@@ -56,20 +47,18 @@ export async function resolveReport(
   resolutionNote?: string,
   adminId?: string
 ) {
-  if (!db) {
+  if (!supabaseAdmin) {
     return { success: false, error: 'Database not configured' };
   }
 
   try {
-    const reportRef = db.collection('reports').doc(reportId);
-    
-    await reportRef.update({
+    await supabaseAdmin.from('reports').update({
       status: action,
-      resolutionNote: resolutionNote || null,
-      resolvedAt: new Date().toISOString(),
-      handledByUserId: adminId || 'admin',
-      updatedAt: new Date().toISOString(),
-    });
+      resolution_note: resolutionNote || null,
+      resolved_at: new Date().toISOString(),
+      handled_by_user_id: adminId || 'admin',
+      updated_at: new Date().toISOString(),
+    }).eq('id', reportId);
 
     revalidatePath('/admin/moderation');
     return { success: true };
@@ -86,32 +75,29 @@ export async function banUser(
   durationDays?: number,
   adminId?: string
 ) {
-  if (!db) {
+  if (!supabaseAdmin) {
     return { success: false, error: 'Database not configured' };
   }
 
   try {
-    const userRef = db.collection('users').doc(userId);
-    const banRef = db.collection('bannedUsers').doc(userId);
-
     const banData = {
-      userId,
-      bannedByUserId: adminId || 'admin',
-      reasonCategory,
-      reasonText,
-      endsAt: durationDays 
+      user_id: userId,
+      banned_by_user_id: adminId || 'admin',
+      reason_category: reasonCategory,
+      reason_text: reasonText,
+      ends_at: durationDays 
         ? new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString()
         : null,
-      createdAt: new Date().toISOString(),
+      created_at: new Date().toISOString(),
     };
 
-    await banRef.set(banData);
+    await supabaseAdmin.from('banned_users').upsert(banData);
 
-    await userRef.update({
+    await supabaseAdmin.from('users').update({
       status: 'BANNED',
-      bannedAt: new Date().toISOString(),
-      banReason: reasonText,
-    });
+      banned_at: new Date().toISOString(),
+      ban_reason: reasonText,
+    }).eq('id', userId);
 
     revalidatePath('/admin/moderation');
     revalidatePath('/admin/users');
@@ -123,21 +109,18 @@ export async function banUser(
 }
 
 export async function unbanUser(userId: string) {
-  if (!db) {
+  if (!supabaseAdmin) {
     return { success: false, error: 'Database not configured' };
   }
 
   try {
-    const userRef = db.collection('users').doc(userId);
-    const banRef = db.collection('bannedUsers').doc(userId);
+    await supabaseAdmin.from('banned_users').delete().eq('user_id', userId);
 
-    await banRef.delete();
-
-    await userRef.update({
+    await supabaseAdmin.from('users').update({
       status: 'ACTIVE',
-      bannedAt: null,
-      banReason: null,
-    });
+      banned_at: null,
+      ban_reason: null,
+    }).eq('id', userId);
 
     revalidatePath('/admin/moderation');
     revalidatePath('/admin/users');
@@ -149,18 +132,16 @@ export async function unbanUser(userId: string) {
 }
 
 export async function hideComment(commentId: string, reason?: string) {
-  if (!db) {
+  if (!supabaseAdmin) {
     return { success: false, error: 'Database not configured' };
   }
 
   try {
-    const commentRef = db.collection('comments').doc(commentId);
-    
-    await commentRef.update({
-      isHidden: true,
-      hiddenReason: reason || 'Hidden by moderator',
-      hiddenAt: new Date().toISOString(),
-    });
+    await supabaseAdmin.from('comments').update({
+      is_hidden: true,
+      hidden_reason: reason || 'Hidden by moderator',
+      hidden_at: new Date().toISOString(),
+    }).eq('id', commentId);
 
     revalidatePath('/admin/moderation');
     return { success: true };
@@ -171,13 +152,12 @@ export async function hideComment(commentId: string, reason?: string) {
 }
 
 export async function deleteComment(commentId: string) {
-  if (!db) {
+  if (!supabaseAdmin) {
     return { success: false, error: 'Database not configured' };
   }
 
   try {
-    const commentRef = db.collection('comments').doc(commentId);
-    await commentRef.delete();
+    await supabaseAdmin.from('comments').delete().eq('id', commentId);
 
     revalidatePath('/admin/moderation');
     return { success: true };
@@ -190,32 +170,24 @@ export async function deleteComment(commentId: string) {
 export async function getFlaggedComments(
   page: number = 1,
   limit: number = 20
-): Promise<{ comments: (Comment & { hiddenReason?: string; hiddenAt?: string })[]; total: number; totalPages: number }> {
-  if (!db) {
+): Promise<{ comments: (Comment & { hidden_reason?: string; hidden_at?: string })[]; total: number; totalPages: number }> {
+  if (!supabaseAdmin) {
     return { comments: [], total: 0, totalPages: 0 };
   }
 
   try {
-    const snapshot = await db.collection('comments')
-      .where('isHidden', '==', true)
-      .orderBy('createdAt', 'desc')
-      .limit(limit)
-      .offset((page - 1) * limit)
-      .get();
+    const { data, count, error } = await supabaseAdmin
+      .from('comments')
+      .select('*', { count: 'exact' })
+      .eq('is_hidden', true)
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
 
-    const countSnapshot = await db.collection('comments')
-      .where('isHidden', '==', true)
-      .count()
-      .get();
+    if (error) throw error;
 
-    const total = countSnapshot.data().count || 0;
+    const total = count || 0;
     const totalPages = Math.ceil(total / limit);
-
-    const comments = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate?.() || doc.data().createdAt,
-    } as Comment & { hiddenReason?: string; hiddenAt?: string }));
+    const comments = (data || []) as (Comment & { hidden_reason?: string; hidden_at?: string })[];
 
     return { comments, total, totalPages };
   } catch (error) {
@@ -228,40 +200,42 @@ export async function getBannedUsers(
   page: number = 1,
   limit: number = 20
 ): Promise<{ users: any[]; total: number; totalPages: number }> {
-  if (!db) {
+  if (!supabaseAdmin) {
     return { users: [], total: 0, totalPages: 0 };
   }
 
   try {
-    const snapshot = await db.collection('bannedUsers')
-      .orderBy('createdAt', 'desc')
-      .limit(limit)
-      .offset((page - 1) * limit)
-      .get();
+    const { data: bannedData, count, error } = await supabaseAdmin
+      .from('banned_users')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
 
-    const countSnapshot = await db.collection('bannedUsers').count().get();
-    const total = countSnapshot.data().count || 0;
+    if (error) throw error;
+
+    const total = count || 0;
     const totalPages = Math.ceil(total / limit);
 
-    const users = await Promise.all(snapshot.docs.map(async (doc) => {
-      const banData = doc.data();
+    const users = await Promise.all((bannedData || []).map(async (banData: any) => {
       let userData: User | null = null;
       
       try {
-        if (db) {
-          const userDoc = await db.collection('users').doc(banData.userId).get();
-          userData = userDoc.exists ? userDoc.data() as User : null;
-        }
+        const { data: user } = await supabaseAdmin
+          .from('users')
+          .select('*')
+          .eq('id', banData.user_id)
+          .single();
+        userData = user as User | null;
       } catch (e) {
         console.error('Error fetching user data:', e);
       }
 
       return {
-        id: doc.id,
+        id: banData.id,
         ...banData,
         user: userData,
-        createdAt: banData.createdAt?.toDate?.() || banData.createdAt,
-        endsAt: banData.endsAt,
+        created_at: banData.created_at,
+        ends_at: banData.ends_at,
       };
     }));
 
@@ -273,19 +247,17 @@ export async function getBannedUsers(
 }
 
 export async function getReportById(reportId: string) {
-  if (!db) return null;
+  if (!supabaseAdmin) return null;
 
   try {
-    const doc = await db.collection('reports').doc(reportId).get();
-    if (!doc.exists) return null;
+    const { data, error } = await supabaseAdmin
+      .from('reports')
+      .select('*')
+      .eq('id', reportId)
+      .single();
 
-    const data = doc.data();
-    return {
-      id: doc.id,
-      ...data,
-      createdAt: data?.createdAt?.toDate?.() || data?.createdAt,
-      updatedAt: data?.updatedAt?.toDate?.() || data?.updatedAt,
-    };
+    if (error || !data) return null;
+    return data;
   } catch (error) {
     console.error('Error fetching report:', error);
     return null;

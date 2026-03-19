@@ -1,7 +1,11 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { useUser, useFirestore } from '@/firebase';
-import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
+import { createBrowserClient } from "@supabase/ssr";
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!;
+const supabase = createBrowserClient(supabaseUrl, supabaseKey);
 
 export interface UserProfile {
   username: string;
@@ -40,54 +44,87 @@ const defaultProfile: UserProfile = {
 };
 
 export function useUserProfile() {
-  const { user } = useUser();
-  const firestore = useFirestore();
+  const { user } = useSupabaseAuth();
   const [profile, setProfile] = useState<UserProfile>(defaultProfile);
   const [loading, setLoading] = useState(true);
 
+  const mapProfile = (data: any): UserProfile => {
+    return {
+      username: data.username || '',
+      bio: data.bio || '',
+      coverBanner: data.cover_banner || '', // If it's added to DB later
+      createdAt: data.created_at || '',
+      theme: data.theme || 'dark',
+      notifications: data.notifications || defaultProfile.notifications,
+    };
+  };
+
   useEffect(() => {
-    if (!user || !firestore) {
-       
+    if (!user) {
       setProfile(defaultProfile);
-       
       setLoading(false);
       return;
     }
 
-    const profileRef = doc(firestore, 'users', user.uid);
-    
-    const unsubscribe = onSnapshot(profileRef, (doc) => {
-      if (doc.exists()) {
-        const data = doc.data() as UserProfile;
-        setProfile({ ...defaultProfile, ...data });
-      } else {
-        // Create initial profile
-        const initialProfile = {
-          ...defaultProfile,
-          username: user.displayName || user.email?.split('@')[0] || '',
-          createdAt: new Date().toISOString(),
-        };
-        setDoc(profileRef, initialProfile);
-        setProfile(initialProfile);
+    const fetchProfile = async () => {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (error) {
+        console.error('Error fetching profile:', error);
+      } else if (data) {
+        setProfile(mapProfile(data));
       }
       setLoading(false);
-    }, (error) => {
-      console.error('Error fetching profile:', error);
-      setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
-  }, [user, firestore]);
+    fetchProfile();
+
+    const channel = supabase
+      .channel(`user_profile_${user.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'users',
+        filter: `id=eq.${user.id}`
+      }, (payload) => {
+        setProfile(mapProfile(payload.new));
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
 
   const updateProfile = useCallback(async (updates: Partial<UserProfile>) => {
-    if (!user || !firestore) return;
+    if (!user) return;
 
-    const profileRef = doc(firestore, 'users', user.uid);
-    await updateDoc(profileRef, {
-      ...updates,
-      updatedAt: new Date().toISOString(),
-    });
-  }, [user, firestore]);
+    // Map UserProfile fields to DB columns
+    const dbUpdates: any = {
+      updated_at: new Date().toISOString(),
+    };
+    
+    if (updates.username !== undefined) dbUpdates.username = updates.username;
+    if (updates.bio !== undefined) dbUpdates.bio = updates.bio;
+    // Note: If you add theme, notifications, cover_banner to your Supabase schema,
+    // you can uncomment these lines:
+    // if (updates.theme !== undefined) dbUpdates.theme = updates.theme;
+    // if (updates.notifications !== undefined) dbUpdates.notifications = updates.notifications;
+    // if (updates.coverBanner !== undefined) dbUpdates.cover_banner = updates.coverBanner;
+
+    const { error } = await supabase
+      .from('users')
+      .update(dbUpdates)
+      .eq('id', user.id);
+
+    if (error) {
+      console.error('Error updating profile:', error);
+    }
+  }, [user]);
 
   const updateUsername = useCallback(async (username: string) => {
     await updateProfile({ username });

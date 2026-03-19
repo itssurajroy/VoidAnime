@@ -4,7 +4,7 @@ import Header from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 
 import { Toaster } from '@/components/ui/toaster';
-import { FirebaseWrapper } from '@/components/FirebaseWrapper';
+import { SupabaseAuthProvider } from '@/hooks/useSupabaseAuth';
 import { ThemeStyles } from '@/components/shared/ThemeStyles';
 import { SplashScreen } from '@/components/layout/SplashScreen';
 import { BackToTop } from '@/components/shared/BackToTop';
@@ -35,17 +35,34 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase: new URL(APP_URL),
     title: {
-      default: 'VoidAnime',
+      default: 'VoidAnime - Watch Anime Online Free',
       template: '%s | VoidAnime',
     },
     description: 'Watch your favorite anime online in HD quality for free. Dubbed and subbed episodes available. No ads, no registration required.',
     applicationName: 'VoidAnime',
     referrer: 'no-referrer',
+    keywords: ['anime', 'watch anime', 'anime streaming', 'free anime', 'dubbed anime', 'subbed anime', 'anime online', 'watch anime online'],
+    authors: [{ name: 'VoidAnime' }],
+    creator: 'VoidAnime',
+    publisher: 'VoidAnime',
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: {
+        index: true,
+        follow: true,
+        'max-video-preview': -1,
+        'max-image-preview': 'large',
+        'max-snippet': -1,
+      },
+    },
     openGraph: {
-      title: 'VoidAnime',
+      title: 'VoidAnime - Watch Anime Online Free',
       description: 'Watch your favorite anime online in HD quality for free.',
       url: APP_URL,
       siteName: 'VoidAnime',
+      locale: 'en_US',
+      type: 'website',
       images: [
         {
           url: '/og-image.png',
@@ -54,8 +71,15 @@ export async function generateMetadata(): Promise<Metadata> {
           alt: 'VoidAnime - The best place to watch anime online',
         },
       ],
-      locale: 'en_US',
-      type: 'website',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: 'VoidAnime - Watch Anime Online Free',
+      description: 'Watch your favorite anime online in HD quality for free.',
+      images: ['/og-image.png'],
+    },
+    verification: {
+      google: 'google-site-verification-code',
     },
     icons: {
       icon: '/favicon.ico',
@@ -88,18 +112,26 @@ export default function RootLayout({
 
       </head>
       <body className="font-body antialiased flex flex-col bg-background min-h-screen overflow-x-hidden" suppressHydrationWarning>
+        {/* Skip Link for Accessibility */}
+        <a 
+          href="#main-content" 
+          className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-black focus:font-bold focus:rounded-lg focus:shadow-lg"
+        >
+          Skip to main content
+        </a>
+        
         <SettingsProvider>
 
-          <SplashScreen />
-          <FirebaseWrapper>
+          <SupabaseAuthProvider>
+            <SplashScreen />
             <Header />
-            <main className="flex-grow animate-enter flex flex-col">{children}</main>
+            <main id="main-content" className="flex-grow animate-enter flex flex-col">{children}</main>
             <Footer />
 
             <Toaster />
             <BackToTop />
             <Analytics />
-          </FirebaseWrapper>
+          </SupabaseAuthProvider>
         </SettingsProvider>
       </body>
     </html>

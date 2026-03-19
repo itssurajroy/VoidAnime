@@ -1,21 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { auth } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 export async function DELETE(request: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get('session')?.value;
+    if (!supabaseAdmin) {
+      return NextResponse.json({ message: 'Server not configured' }, { status: 500 });
+    }
 
-    if (!sessionCookie || !auth) {
+    const cookieStore = await cookies();
+    const sessionCookie = cookieStore.get('sb-access-token')?.value || cookieStore.get('session')?.value;
+
+    if (!sessionCookie) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    const decodedClaims = await auth.verifySessionCookie(sessionCookie);
-    const uid = decodedClaims.uid;
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(sessionCookie);
+    if (error || !user) {
+      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
+
+    const uid = user.id;
 
     try {
-      await auth.deleteUser(uid);
+      const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(uid);
+      if (deleteError) throw deleteError;
 
       return NextResponse.json({
         message: 'Account deleted successfully',

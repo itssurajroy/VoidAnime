@@ -7,8 +7,7 @@ import {
     HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import { getAnimeQtip } from '@/services/anime';
-import type { QtipData } from '@/types';
-import { Star, PlayCircle, Captions, Mic, Loader2, Calendar, Info, Activity } from 'lucide-react';
+import { Star, PlayCircle, Loader2, Info, Activity } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import Link from 'next/link';
@@ -18,8 +17,21 @@ interface AnimeQtipProps {
     children: React.ReactNode;
 }
 
+interface QtipAnimeData {
+    id: string;
+    name: string;
+    poster: string;
+    type: string;
+    episodes: { sub: number; dub: number };
+    rating: string;
+    quality: string;
+    status: string;
+    synopsis: string;
+    genres: string[];
+}
+
 export function AnimeQtip({ animeId, children }: AnimeQtipProps) {
-    const [qtipData, setQtipData] = useState<QtipData['anime'] | null>(null);
+    const [qtipData, setQtipData] = useState<QtipAnimeData | null>(null);
     const [loading, setLoading] = useState(false);
     const [isOpen, setIsOpen] = useState(false);
 
@@ -74,7 +86,7 @@ export function AnimeQtip({ animeId, children }: AnimeQtipProps) {
                             <div className="flex flex-wrap items-center gap-3 relative z-10">
                                 <div className="flex items-center gap-1.5 px-2 py-1 bg-yellow-400/10 rounded-lg border border-yellow-400/20">
                                     <Star className="w-3.5 h-3.5 text-yellow-400 fill-current" />
-                                    <span className="text-[11px] font-black text-yellow-400">{qtipData.malscore || 'N/A'}</span>
+                                    <span className="text-[11px] font-black text-yellow-400">{qtipData.rating || 'N/A'}</span>
                                 </div>
                                 <Badge variant="outline" className="bg-white/5 border-white/10 text-white/40 font-black text-[9px] uppercase tracking-widest px-2.5 py-1">
                                     {qtipData.quality || 'HD'}
@@ -93,26 +105,13 @@ export function AnimeQtip({ animeId, children }: AnimeQtipProps) {
                                     <span className="text-[9px] font-black uppercase tracking-[0.2em]">Description</span>
                                 </div>
                                 <p className="text-white/50 text-[13px] leading-relaxed line-clamp-4 italic font-medium">
-                                    &quot;{qtipData.description || 'No description available for this series.'}&quot;
+                                    &quot;{qtipData.synopsis || 'No description available for this series.'}&quot;
                                 </p>
                             </div>
 
                             {/* Details */}
                             <div className="grid grid-cols-1 gap-4 pt-2">
-                                {qtipData.jname && (
-                                    <div className="flex items-center gap-3 group/meta">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-white/10 group-hover/meta:bg-primary transition-colors" />
-                                        <span className="text-[9px] font-black text-white/20 uppercase tracking-widest shrink-0">Japanese:</span>
-                                        <span className="text-[11px] font-bold text-white/40 truncate">{qtipData.jname}</span>
-                                    </div>
-                                )}
                                 <div className="flex items-center justify-between">
-                                    {qtipData.aired && (
-                                        <div className="flex items-center gap-2 text-white/40">
-                                            <Calendar className="w-3.5 h-3.5 opacity-50" />
-                                            <span className="text-[10px] font-black uppercase tracking-widest">{qtipData.aired}</span>
-                                        </div>
-                                    )}
                                     {qtipData.status && (
                                         <div className="flex items-center gap-2 px-2.5 py-1 bg-white/5 rounded-lg border border-white/5">
                                             <Activity className="w-3 h-3 text-emerald-400" />

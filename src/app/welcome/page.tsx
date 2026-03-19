@@ -1,5 +1,5 @@
 'use client';
-import { useUser } from '@/firebase';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
@@ -9,18 +9,23 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { updateProfile } from 'firebase/auth';
+import { createBrowserClient } from "@supabase/ssr";
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!
+);
+
 const welcomeSchema = z.object({
-  displayName: z.string().min(3, 'Display name must be at least 3 characters.').max(20, 'Display name must be 20 characters or less.'),
+  username: z.string().min(3, 'Username must be at least 3 characters.').max(20, 'Username must be 20 characters or less.'),
 });
 
 type WelcomeValues = z.infer<typeof welcomeSchema>;
 
 export default function WelcomePage() {
-    const { user, isUserLoading } = useUser();
+    const { user, loading } = useSupabaseAuth();
     const router = useRouter();
     const { toast } = useToast();
 
@@ -29,18 +34,23 @@ export default function WelcomePage() {
     });
 
     useEffect(() => {
-        if (!isUserLoading && !user) {
+        if (!loading && !user) {
             router.push('/home');
         }
-        if (!isUserLoading && user && user.displayName) {
+        if (!loading && user && user.user_metadata?.username) {
             router.push('/home');
         }
-    }, [user, isUserLoading, router]);
+    }, [user, loading, router]);
 
     const onSubmit = async (data: WelcomeValues) => {
         if (!user) return;
         try {
-            await updateProfile(user, { displayName: data.displayName });
+            const { error } = await supabase.auth.updateUser({
+                data: { username: data.username }
+            });
+            
+            if (error) throw error;
+            
             toast({
                 title: "Welcome to VoidAnime!",
                 description: "Your profile has been set up.",
@@ -55,7 +65,7 @@ export default function WelcomePage() {
         }
     };
     
-    if (isUserLoading || !user) {
+    if (loading || !user) {
         return (
             <div className="flex items-center justify-center h-screen">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -68,14 +78,14 @@ export default function WelcomePage() {
             <Card className="w-full max-w-md">
                 <CardHeader>
                     <CardTitle className="text-2xl">Welcome to VoidAnime!</CardTitle>
-                    <CardDescription>Let&apos;s set up your profile. Choose a display name to get started.</CardDescription>
+                    <CardDescription>Let&apos;s set up your profile. Choose a username to get started.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
                         <div className="space-y-2">
-                            <Label htmlFor="displayName">Display Name</Label>
-                            <Input id="displayName" {...register("displayName")} placeholder="Your public username"/>
-                            {errors.displayName && <p className="text-sm text-destructive">{errors.displayName.message}</p>}
+                            <Label htmlFor="username">Username</Label>
+                            <Input id="username" {...register("username")} placeholder="Your public username"/>
+                            {errors.username && <p className="text-sm text-destructive">{errors.username.message}</p>}
                         </div>
                         <Button type="submit" className="w-full" disabled={isSubmitting}>
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

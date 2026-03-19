@@ -11,8 +11,8 @@ import {
     MoreVertical,
     Trash2
 } from 'lucide-react';
-import { useWatchlist } from '@/hooks/use-watchlist';
-import { useUser } from '@/firebase';
+import { useWatchlist } from '@/hooks/use-supabase-watchlist';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -39,12 +39,12 @@ const STATUS_OPTIONS: { label: string; value: WatchlistStatus; color: string }[]
 ];
 
 export function DetailActions({ anime }: DetailActionsProps) {
-    const { user } = useUser();
+    const { user } = useSupabaseAuth();
     const { watchlist, addItem, removeItem, updateStatus, isInWatchlist, loading } = useWatchlist();
     const { toast } = useToast();
     const [isSharing, setIsSharing] = useState(false);
 
-    const itemInList = watchlist.find(item => item.id === anime.id);
+    const itemInList = watchlist.find(item => item.anime_id === anime.id);
     const currentStatus = itemInList?.status;
 
     const handleShare = async () => {

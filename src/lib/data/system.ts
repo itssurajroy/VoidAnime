@@ -1,6 +1,8 @@
 import 'server-only';
 import type { SystemConfig, FeatureFlag, SystemService, BackgroundJob, ServiceStatus, JobStatus } from '@/types/db';
-import { db } from '@/lib/firebase-admin';
+import { supabaseAdmin as _supabaseAdmin } from '@/lib/supabase-admin';
+
+const supabaseAdmin = _supabaseAdmin!;
 
 const DEFAULT_FEATURE_FLAGS: FeatureFlag[] = [
     { key: 'embed-video-player', description: 'Enables video player embedding for all content.', enabled: true },
@@ -39,29 +41,40 @@ let cacheCleared = false;
 let cacheClearedAt: Date | null = null;
 
 async function getOrCreateSystemConfig(): Promise<SystemConfig> {
-    if (!db) return DEFAULT_SYSTEM_CONFIG;
-    
     try {
-        const doc = await db.collection('system').doc('config').get();
-        if (!doc.exists) {
-            await db.collection('system').doc('config').set(DEFAULT_SYSTEM_CONFIG);
+        const { data, error } = await supabaseAdmin
+            .from('system_config')
+            .select('*')
+            .eq('id', 'config')
+            .maybeSingle();
+
+        if (error) throw error;
+        
+        if (!data) {
+            const { error: insertError } = await supabaseAdmin
+                .from('system_config')
+                .insert([{ ...DEFAULT_SYSTEM_CONFIG, id: 'config' }]);
+            
+            if (insertError) {
+                console.error('Failed to create default system config:', insertError);
+                return DEFAULT_SYSTEM_CONFIG;
+            }
             return DEFAULT_SYSTEM_CONFIG;
         }
         
-        const data = doc.data() as any;
         return {
             ...DEFAULT_SYSTEM_CONFIG,
             ...data,
-            updatedAt: data.updatedAt?.toDate?.() || new Date(),
+            updatedAt: data.updatedAt ? new Date(data.updatedAt) : new Date(),
             featureFlags: data.featureFlags || DEFAULT_FEATURE_FLAGS,
             services: (data.services || DEFAULT_SERVICES).map((s: any) => ({
                 ...s,
-                lastChecked: s.lastChecked?.toDate?.() || new Date()
+                lastChecked: s.lastChecked ? new Date(s.lastChecked) : new Date()
             })),
             jobs: (data.jobs || DEFAULT_JOBS).map((j: any) => ({
                 ...j,
-                lastRun: j.lastRun?.toDate?.() || null,
-                nextRun: j.nextRun?.toDate?.() || null
+                lastRun: j.lastRun ? new Date(j.lastRun) : null,
+                nextRun: j.nextRun ? new Date(j.nextRun) : null
             }))
         };
     } catch (e) {
@@ -71,12 +84,16 @@ async function getOrCreateSystemConfig(): Promise<SystemConfig> {
 }
 
 async function saveSystemConfig(updates: Partial<SystemConfig>): Promise<void> {
-    if (!db) return;
     try {
-        await db.collection('system').doc('config').set({
-            ...updates,
-            updatedAt: new Date()
-        }, { merge: true });
+        const { error } = await supabaseAdmin
+            .from('system_config')
+            .upsert({
+                id: 'config',
+                ...updates,
+                updatedAt: new Date().toISOString()
+            });
+        
+        if (error) throw error;
     } catch (e) {
         console.error('Failed to save system config:', e);
     }
@@ -127,7 +144,6 @@ export async function checkServiceHealth(service: SystemService): Promise<Servic
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
 
-        // Make sure to use an absolute URL if needed, but here we assume absolute is provided or we fetch relative
         const url = service.url.startsWith('/') ? `http://localhost:3000${service.url}` : service.url;
         
         const response = await fetch(url, {

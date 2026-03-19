@@ -1,34 +1,45 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { db } from '@/lib/firebase-admin';
+import { supabaseAdmin as _supabaseAdmin } from '@/lib/supabase-admin';
 import { NewsItem } from '@/types';
-import { FieldValue } from 'firebase-admin/firestore';
 import { verifyAdminAction, verifyServerSession } from '@/lib/auth-utils';
 import type { UserRole } from '@/types/db';
 
-const COLLECTION_NAME = 'news';
+const supabaseAdmin = _supabaseAdmin!;
+
+const TABLE_NAME = 'news';
 
 export async function getNewsAction() {
-    if (!db) {
-        console.error('Database not initialized');
-        return [];
-    }
-
     try {
-        const snapshot = await db.collection(COLLECTION_NAME)
-            .orderBy('createdAt', 'desc')
-            .get();
+        const { data, error } = await supabaseAdmin
+            .from(TABLE_NAME)
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
         
-        return snapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-                id: doc.id,
-                ...data,
-                createdAt: data.createdAt?.toDate?.() ? data.createdAt.toDate().toISOString() : new Date().toISOString(),
-                updatedAt: data.updatedAt?.toDate?.() ? data.updatedAt.toDate().toISOString() : (data.createdAt?.toDate?.() ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
-            };
-        }) as NewsItem[];
+        return (data || []).map(item => ({
+            id: item.id,
+            title: item.title,
+            description: item.description,
+            content: item.content,
+            slug: item.slug,
+            status: item.status,
+            tags: item.tags,
+            authorName: item.author_name,
+            authorAvatar: item.author_avatar,
+            authorRole: item.author_role,
+            seoTitle: item.seo_title,
+            seoDescription: item.seo_description,
+            type: item.type,
+            thumbnailText: item.thumbnail_text,
+            gradient: item.gradient,
+            image: item.image,
+            date: item.date,
+            createdAt: item.created_at,
+            updatedAt: item.updated_at,
+        })) as NewsItem[];
     } catch (error) {
         console.error('Error fetching news:', error);
         return [];
@@ -36,37 +47,46 @@ export async function getNewsAction() {
 }
 
 export async function getNewsBySlugAction(slug: string) {
-    if (!db) return null;
-
     try {
         // Try searching by slug first
-        let snapshot = await db.collection(COLLECTION_NAME)
-            .where('slug', '==', slug)
-            .limit(1)
-            .get();
+        let { data: item, error } = await supabaseAdmin
+            .from(TABLE_NAME)
+            .select('*')
+            .eq('slug', slug)
+            .single();
         
         // Fallback to ID if no slug match
-        if (snapshot.empty) {
-            const doc = await db.collection(COLLECTION_NAME).doc(slug).get();
-            if (doc.exists) {
-                const data = doc.data()!;
-                return {
-                    id: doc.id,
-                    ...data,
-                    createdAt: data.createdAt?.toDate?.() ? data.createdAt.toDate().toISOString() : new Date().toISOString(),
-                    updatedAt: data.updatedAt?.toDate?.() ? data.updatedAt.toDate().toISOString() : (data.createdAt?.toDate?.() ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
-                } as NewsItem;
-            }
-            return null;
+        if (error || !item) {
+            const { data: itemById, error: idError } = await supabaseAdmin
+                .from(TABLE_NAME)
+                .select('*')
+                .eq('id', slug)
+                .single();
+            
+            if (idError || !itemById) return null;
+            item = itemById;
         }
 
-        const doc = snapshot.docs[0];
-        const data = doc.data();
         return {
-            id: doc.id,
-            ...data,
-            createdAt: data.createdAt?.toDate?.() ? data.createdAt.toDate().toISOString() : new Date().toISOString(),
-            updatedAt: data.updatedAt?.toDate?.() ? data.updatedAt.toDate().toISOString() : (data.createdAt?.toDate?.() ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
+            id: item.id,
+            title: item.title,
+            description: item.description,
+            content: item.content,
+            slug: item.slug,
+            status: item.status,
+            tags: item.tags,
+            authorName: item.author_name,
+            authorAvatar: item.author_avatar,
+            authorRole: item.author_role,
+            seoTitle: item.seo_title,
+            seoDescription: item.seo_description,
+            type: item.type,
+            thumbnailText: item.thumbnail_text,
+            gradient: item.gradient,
+            image: item.image,
+            date: item.date,
+            createdAt: item.created_at,
+            updatedAt: item.updated_at,
         } as NewsItem;
     } catch (error) {
         console.error('Error fetching news by slug:', error);
@@ -83,41 +103,56 @@ export async function saveNewsAction(news: Partial<NewsItem>) {
         return { success: false, error: 'Unauthorized.' };
     }
 
-    if (!db) {
-        return { success: false, error: 'Database not initialized' };
-    }
-
     try {
-        const { id, ...data } = news;
+        const { id, ...newsData } = news;
         
         // Auto-generate slug if not provided
-        if (!data.slug && data.title) {
-            data.slug = data.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+        if (!newsData.slug && newsData.title) {
+            newsData.slug = newsData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
         }
         
         // Ensure default type is 'article' for new blogs
-        if (!data.type) {
-            data.type = 'article';
+        if (!newsData.type) {
+            newsData.type = 'article';
         }
 
-        if (!data.status) {
-            data.status = 'published';
+        if (!newsData.status) {
+            newsData.status = 'published';
         }
 
         // Add author role
-        data.authorRole = session.role;
+        const mappedData: any = {
+            title: newsData.title,
+            description: newsData.description,
+            content: newsData.content,
+            slug: newsData.slug,
+            status: newsData.status,
+            tags: newsData.tags,
+            author_name: newsData.authorName,
+            author_avatar: newsData.authorAvatar,
+            author_role: session.role,
+            seo_title: newsData.seoTitle,
+            seo_description: newsData.seoDescription,
+            type: newsData.type,
+            thumbnail_text: newsData.thumbnailText,
+            gradient: newsData.gradient,
+            image: newsData.image,
+            date: newsData.date || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        };
         
         if (id) {
-            await db.collection(COLLECTION_NAME).doc(id).update({
-                ...data,
-                updatedAt: FieldValue.serverTimestamp(),
-            });
+            const { error } = await supabaseAdmin
+                .from(TABLE_NAME)
+                .update(mappedData)
+                .eq('id', id);
+            if (error) throw error;
         } else {
-            await db.collection(COLLECTION_NAME).add({
-                ...data,
-                createdAt: FieldValue.serverTimestamp(),
-                updatedAt: FieldValue.serverTimestamp(),
-            });
+            mappedData.created_at = new Date().toISOString();
+            const { error } = await supabaseAdmin
+                .from(TABLE_NAME)
+                .insert(mappedData);
+            if (error) throw error;
         }
         
         revalidatePath('/news');
@@ -135,12 +170,13 @@ export async function deleteNewsAction(id: string) {
         return { success: false, error: 'Unauthorized.' };
     }
 
-    if (!db) {
-        return { success: false, error: 'Database not initialized' };
-    }
-
     try {
-        await db.collection(COLLECTION_NAME).doc(id).delete();
+        const { error } = await supabaseAdmin
+            .from(TABLE_NAME)
+            .delete()
+            .eq('id', id);
+        if (error) throw error;
+        
         revalidatePath('/news');
         revalidatePath('/admin/news');
         return { success: true };

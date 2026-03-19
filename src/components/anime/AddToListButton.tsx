@@ -1,6 +1,6 @@
 'use client';
 
-import { useUser } from '@/firebase';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import { Plus, Bookmark } from 'lucide-react';
 import {
   DropdownMenu,
@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button, type ButtonProps } from '@/components/ui/button';
-import { useWatchlist } from '@/hooks/use-watchlist';
+import { useWatchlist } from '@/hooks/use-supabase-watchlist';
 import { AnimeCard, WatchlistStatus } from '@/types';
 import { AuthTrigger } from '../auth/AuthTrigger';
 import { cn } from '@/lib/utils';
@@ -24,10 +24,10 @@ interface AddToListButtonProps {
 }
 
 export function AddToListButton({ anime, size, variant, iconOnly, className, iconClassName }: AddToListButtonProps) {
-    const { user } = useUser();
+    const { user } = useSupabaseAuth();
     const { watchlist, addItem, updateStatus } = useWatchlist();
 
-    const watchlistItem = watchlist.find(item => item.id === anime.id);
+    const watchlistItem = watchlist.find(item => item.anime_id === anime.id);
     const currentStatus = watchlistItem?.status;
 
     if (!user) {

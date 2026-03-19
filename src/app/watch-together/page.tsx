@@ -5,7 +5,7 @@ import { LobbyClient } from './LobbyClient';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'Watch Together - VoidAnime',
+  title: 'Watch Party - VoidAnime',
   description: 'Join active watch parties or create your own to watch anime with friends.',
 };
 

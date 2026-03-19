@@ -1,25 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  turbopack: {
-    root: __dirname,
-  },
-  transpilePackages: [
-    'firebase',
-    '@firebase/auth',
-    '@firebase/app',
-    '@firebase/firestore',
-    '@firebase/storage',
-    '@firebase/messaging',
-  ],
   reactCompiler: true,
   experimental: {
     optimizePackageImports: ['lucide-react', 'framer-motion', 'date-fns'],
   },
-  serverExternalPackages: ['firebase-admin'],
   images: {
     unoptimized: true,
+    qualities: [25, 50, 75, 100],
     remotePatterns: [
       {
         protocol: 'https',

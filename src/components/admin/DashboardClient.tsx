@@ -27,8 +27,7 @@ import type { ChartConfig } from "@/components/ui/chart"
 import type { DailyStats, TopAnime } from '@/actions/analytics';
 import { getDashboardStats, getDailyStats, getTopAnimeByViews, getRecentActivity } from '@/actions/analytics';
 import { fetchBackgroundJobs } from '@/actions/system';
-import { useFirebase } from '@/firebase/provider';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { createBrowserClient } from '@supabase/ssr';
 import type { BackgroundJob } from '@/types/db';
 import { cn } from '@/lib/utils';
 import { GlassPanel } from '@/components/ui/GlassPanel';
@@ -63,7 +62,11 @@ interface DashboardClientProps {
 }
 
 export function DashboardClient({ initialStats, dailyStats: initialDailyStats, topAnime: initialTopAnime, initialJobs, initialActivity }: DashboardClientProps) {
-    const { firestore } = useFirebase();
+    const supabase = createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    
     const [isLoading, setIsLoading] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     
@@ -109,24 +112,29 @@ export function DashboardClient({ initialStats, dailyStats: initialDailyStats, t
     }, [initialStats, loadInitialData]);
 
     useEffect(() => {
-        if (!firestore) return;
-        
-        // Live Activity Listener
-        const activityQuery = query(
-            collection(firestore, 'adminActivity'),
-            orderBy('timestamp', 'desc'),
-            limit(10)
-        );
-
-        const unsubscribe = onSnapshot(activityQuery, (snapshot) => {
-            const newActivity = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            setActivity(newActivity);
-        }, (error) => {
-            console.error("Firestore Activity Listener Error:", error);
-        });
+        // Live Activity Listener using Supabase Realtime
+        const channel = supabase
+            .channel('admin_activity_feed')
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'admin_activity',
+                },
+                (payload) => {
+                    const newEntry = {
+                        id: payload.new.id,
+                        adminName: payload.new.admin_name,
+                        action: payload.new.action,
+                        targetType: payload.new.target_type,
+                        targetId: payload.new.target_id,
+                        timestamp: payload.new.timestamp || payload.new.created_at,
+                    };
+                    setActivity(prev => [newEntry, ...prev].slice(0, 10));
+                }
+            )
+            .subscribe();
 
         const interval = setInterval(async () => {
             const [realtime, backgroundJobs] = await Promise.all([
@@ -138,10 +146,10 @@ export function DashboardClient({ initialStats, dailyStats: initialDailyStats, t
         }, 30000); 
         
         return () => {
-            unsubscribe();
+            supabase.removeChannel(channel);
             clearInterval(interval);
         };
-    }, [firestore]);
+    }, [supabase]);
 
     const handleRefresh = useCallback(async () => {
         setIsLoading(true);

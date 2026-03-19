@@ -21,12 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/firebase';
-import {
-    createUserWithEmailAndPassword,
-    signInWithEmailAndPassword,
-    sendPasswordResetEmail,
-} from 'firebase/auth';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import { Loader2, LogIn, UserPlus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -50,7 +45,7 @@ interface AuthTriggerProps {
 export function AuthTrigger({ children, mode = 'login' }: AuthTriggerProps) {
     const [isOpen, setIsOpen] = useState(false);
     const { toast } = useToast();
-    const auth = useAuth();
+    const { signIn, signUp, resetPassword, loading: authLoading } = useSupabaseAuth();
     const router = useRouter();
     const [activeTab, setActiveTab] = useState(mode);
     const [isLoading, setIsLoading] = useState(false);
@@ -60,32 +55,20 @@ export function AuthTrigger({ children, mode = 'login' }: AuthTriggerProps) {
     const { register: registerSignUp, handleSubmit: handleSignUpSubmit, formState: { errors: signUpErrors } } = useForm<SignUpValues>({ resolver: zodResolver(signUpSchema) });
 
     const onLogin = async (data: LoginValues) => {
-        if (!auth) return;
         setIsLoading(true);
         try {
-            await signInWithEmailAndPassword(auth, data.email, data.password);
+            await signIn(data.email, data.password);
             toast({ title: "Logged in successfully!" });
             setIsOpen(false);
             router.push('/home');
         } catch (error: any) {
             let description = 'An unexpected error occurred. Please try again.';
-            switch (error.code) {
-                case 'auth/invalid-credential':
-                case 'auth/user-not-found':
-                case 'auth/wrong-password':
-                    description = 'Invalid email or password. Please try again.';
-                    break;
-                case 'auth/invalid-email':
-                    description = 'The email address is not valid.';
-                    break;
-                case 'auth/user-disabled':
-                    description = 'This user account has been disabled.';
-                    break;
-                case 'auth/too-many-requests':
-                    description = 'Too many failed login attempts. Please reset your password or try again later.';
-                    break;
-                default:
-                    description = error.message;
+            if (error.message?.includes('Invalid login credentials')) {
+                description = 'Invalid email or password. Please try again.';
+            } else if (error.message?.includes('User not found')) {
+                description = 'Invalid email or password. Please try again.';
+            } else if (error.message) {
+                description = error.message;
             }
             toast({ variant: 'destructive', title: 'Login Failed', description });
         } finally {
@@ -94,28 +77,18 @@ export function AuthTrigger({ children, mode = 'login' }: AuthTriggerProps) {
     };
 
     const onSignUp = async (data: SignUpValues) => {
-        if (!auth) return;
         setIsLoading(true);
         try {
-            const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
-            if (userCredential.user) {
-              setIsOpen(false);
-              router.push('/welcome');
-            }
+            await signUp(data.email, data.password);
+            toast({ title: "Account created! Please check your email to verify." });
+            setIsOpen(false);
+            router.push('/home');
         } catch (error: any) {
             let description = 'An unexpected error occurred. Please try again.';
-            switch (error.code) {
-                case 'auth/email-already-in-use':
-                    description = 'An account with this email address already exists.';
-                    break;
-                case 'auth/invalid-email':
-                    description = 'The email address is not valid.';
-                    break;
-                case 'auth/weak-password':
-                    description = 'The password is too weak. It must be at least 6 characters long.';
-                    break;
-                default:
-                    description = error.message;
+            if (error.message?.includes('User already registered')) {
+                description = 'An account with this email address already exists.';
+            } else if (error.message) {
+                description = error.message;
             }
             toast({ variant: 'destructive', title: 'Sign Up Failed', description });
         } finally {
@@ -123,18 +96,28 @@ export function AuthTrigger({ children, mode = 'login' }: AuthTriggerProps) {
         }
     };
 
+    const [resetEmail, setResetEmail] = useState('');
+    const [showResetForm, setShowResetForm] = useState(false);
+
     const handlePasswordReset = async () => {
-        const email = prompt("Please enter your email to reset your password:");
-        if (email && auth) {
-            setIsResetLoading(true);
-            try {
-                await sendPasswordResetEmail(auth, email);
-                toast({ title: "Password Reset Email Sent", description: "Check your inbox for instructions." });
-            } catch (error: any) {
-                toast({ variant: "destructive", title: "Error", description: error.message });
-            } finally {
-                setIsResetLoading(false);
-            }
+        if (!showResetForm) {
+            setShowResetForm(true);
+            return;
+        }
+        if (!resetEmail.trim()) {
+            toast({ variant: 'destructive', title: 'Error', description: 'Please enter your email address.' });
+            return;
+        }
+        setIsResetLoading(true);
+        try {
+            await resetPassword(resetEmail.trim());
+            toast({ title: "Password Reset Email Sent", description: "Check your inbox for instructions." });
+            setShowResetForm(false);
+            setResetEmail('');
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Error", description: error.message || "Failed to send reset email" });
+        } finally {
+            setIsResetLoading(false);
         }
     }
 
@@ -199,13 +182,27 @@ export function AuthTrigger({ children, mode = 'login' }: AuthTriggerProps) {
                                     <Input id="login-password" type="password" {...registerLogin("password")} className="h-12 bg-white/5 border-white/5 rounded-xl focus:border-primary/50 transition-all" />
                                     {loginErrors.password && <p className="text-xs text-red-500 font-bold uppercase tracking-tight">{loginErrors.password.message}</p>}
                                 </div>
-                                <Button type="submit" className="w-full h-12 rounded-xl bg-primary text-black font-black uppercase tracking-widest text-[11px] shadow-xl shadow-primary/10 hover:bg-primary/90 transition-all active:scale-[0.98]" disabled={isLoading}>
+                                {showResetForm && (
+                                    <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                                        <Label htmlFor="reset-email" className="text-[10px] font-black uppercase tracking-widest text-white/20">Your Email Address</Label>
+                                        <Input 
+                                            id="reset-email" 
+                                            type="email" 
+                                            value={resetEmail}
+                                            onChange={(e) => setResetEmail(e.target.value)}
+                                            placeholder="Enter your email" 
+                                            className="h-12 bg-white/5 border-white/5 rounded-xl focus:border-primary/50 transition-all" 
+                                        />
+                                    </div>
+                                )}
+                                <Button type="submit" className="w-full h-12 rounded-xl bg-primary text-black font-black uppercase tracking-widest text-[11px] shadow-xl shadow-primary/10 hover:bg-primary/90 transition-all active:scale-[0.98]" disabled={isLoading || isResetLoading}>
                                     {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                    Login
+                                    {showResetForm ? 'Send Reset Link' : 'Login'}
                                 </Button>
                                 <div className="text-center">
                                     <Button type="button" variant="link" className="p-0 h-auto text-[10px] font-black uppercase tracking-widest text-white/20 hover:text-primary transition-colors" onClick={handlePasswordReset} disabled={isResetLoading}>
-                                        Forgot Password?
+                                        {isResetLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                        {showResetForm ? 'Cancel' : 'Forgot Password?'}
                                     </Button>
                                 </div>
                             </form>

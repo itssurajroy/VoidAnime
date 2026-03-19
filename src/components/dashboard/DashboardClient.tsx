@@ -1,7 +1,7 @@
 'use client';
 
-import { useUser } from '@/firebase';
-import { useWatchlist } from '@/hooks/use-watchlist';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
+import { useWatchlist } from '@/hooks/use-supabase-watchlist';
 import { SectionTitle } from '@/components/shared/SectionTitle';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 
 export function DashboardClient() {
-  const { user } = useUser();
+  const { user } = useSupabaseAuth();
   const { watchlist } = useWatchlist();
 
   const stats = {
@@ -39,7 +39,7 @@ export function DashboardClient() {
     .slice(0, 5);
 
   const totalWatched = watchlist.reduce((acc, w) => acc + w.progress, 0);
-  const totalEpisodes = watchlist.reduce((acc, w) => acc + w.totalEpisodes, 0);
+  const totalEpisodes = watchlist.reduce((acc, w) => acc + w.total_episodes, 0);
   const watchProgress = totalEpisodes > 0 ? Math.round((totalWatched / totalEpisodes) * 100) : 0;
 
   return (
@@ -47,7 +47,7 @@ export function DashboardClient() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <SectionTitle>
-            Welcome back, {user?.displayName || 'Anime Fan'}!
+            Welcome back, {user?.user_metadata?.username || user?.email?.split('@')[0] || 'Anime Fan'}!
           </SectionTitle>
           <p className="text-muted-foreground mt-1">
             Continue your anime journey
@@ -141,28 +141,28 @@ export function DashboardClient() {
               <CardContent>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   {continueWatching.map((item) => (
-                    <Link key={item.id} href={`/anime/${item.id}`} className="group">
+                    <Link key={item.id} href={`/anime/${item.anime_id}`} className="group">
                       <div className="relative aspect-[2/3] rounded-lg overflow-hidden mb-2">
                         <Image
-                          src={item.poster}
-                          alt={item.name}
+                          src={item.anime_poster || ""}
+                          alt={item.anime_title}
                           fill
                           className="object-cover group-hover:scale-105 transition-transform"
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
                         <div className="absolute bottom-2 left-2 right-2">
-                          <p className="text-sm font-medium line-clamp-1">{item.name}</p>
+                          <p className="text-sm font-medium line-clamp-1">{item.anime_title}</p>
                         </div>
                         <div className="absolute bottom-0 left-0 right-0 h-1 bg-muted">
                           <div 
                             className="h-full bg-primary" 
-                            style={{ width: `${(item.progress / item.totalEpisodes) * 100}%` }}
+                            style={{ width: `${(item.progress / item.total_episodes) * 100}%` }}
                           />
                         </div>
                       </div>
                       <div className="flex items-center justify-between text-sm text-muted-foreground">
                         <span>Episode {item.progress + 1}</span>
-                        <span>{Math.round((item.progress / item.totalEpisodes) * 100)}%</span>
+                        <span>{Math.round((item.progress / item.total_episodes) * 100)}%</span>
                       </div>
                     </Link>
                   ))}
@@ -224,13 +224,13 @@ export function DashboardClient() {
             <CardContent className="space-y-4">
               <div className="flex items-center gap-4">
                 <Avatar className="h-16 w-16">
-                  <AvatarImage src={user?.photoURL || ''} />
+                  <AvatarImage src={user?.user_metadata?.avatar_url || undefined} />
                   <AvatarFallback className="text-lg">
-                    {user?.displayName?.charAt(0) || user?.email?.charAt(0) || 'U'}
+                    {user?.user_metadata?.username?.charAt(0) || user?.email?.charAt(0) || 'U'}
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <p className="font-medium">{user?.displayName || 'User'}</p>
+                  <p className="font-medium">{user?.user_metadata?.username || 'User'}</p>
                   <p className="text-sm text-muted-foreground truncate max-w-[150px]">
                     {user?.email}
                   </p>

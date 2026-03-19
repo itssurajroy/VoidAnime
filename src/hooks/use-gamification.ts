@@ -1,33 +1,43 @@
 'use client';
 
 import { useCallback } from 'react';
-import { useUser, useFirestore } from '@/firebase';
-import { doc, getDoc, updateDoc, increment, serverTimestamp, setDoc, arrayUnion } from 'firebase/firestore';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
+import { supabase as _supabase } from '@/lib/supabase';
 import { calculateLevel, AVAILABLE_BADGES } from '@/types/gamification';
 import { useToast } from '@/hooks/use-toast';
 import { logger } from '@/lib/logger';
+
+const supabase = _supabase!;
 
 // Constants
 const DAILY_XP_LIMIT = 100;
 
 export const useGamification = () => {
-    const { user } = useUser();
-    const firestore = useFirestore();
+    const { user } = useSupabaseAuth();
     const { toast } = useToast();
 
     const awardBadge = useCallback(async (badgeId: string) => {
-        if (!user || !firestore) return;
+        if (!user) return;
         try {
-            const userRef = doc(firestore, 'users', user.uid);
-            const userSnap = await getDoc(userRef);
-            if (!userSnap.exists()) return;
+            const { data: userData, error: fetchError } = await supabase
+                .from('users')
+                .select('badges')
+                .eq('id', user.id)
+                .single();
 
-            const badges = userSnap.data().badges || [];
+            if (fetchError || !userData) return;
+
+            const badges = userData.badges || [];
             if (badges.includes(badgeId)) return; // Already has it
 
-            await updateDoc(userRef, {
-                badges: arrayUnion(badgeId)
-            });
+            const { error: updateError } = await supabase
+                .from('users')
+                .update({
+                    badges: [...badges, badgeId]
+                })
+                .eq('id', user.id);
+
+            if (updateError) throw updateError;
 
             const badgeInfo = AVAILABLE_BADGES.find(b => b.id === badgeId);
             toast({
@@ -37,26 +47,28 @@ export const useGamification = () => {
         } catch (error) {
             logger.error('Failed to award badge:', error);
         }
-    }, [user, firestore, toast]);
+    }, [user, toast]);
 
     const awardXP = useCallback(async (amount: number, reason: string, isWatchAction = false) => {
-        if (!user || !firestore) return;
+        if (!user) return;
 
         try {
-            const userRef = doc(firestore, 'users', user.uid);
-            const userSnap = await getDoc(userRef);
+            const { data: userData, error: fetchError } = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', user.id)
+                .single();
 
-            if (!userSnap.exists()) return;
+            if (fetchError || !userData) return;
 
-            const userData = userSnap.data();
             const currentXp = userData.xp || 0;
             const currentLevel = userData.level || 1;
             const badges = userData.badges || [];
 
             let finalAmount = amount;
             const now = new Date();
-            let lastReset = userData.lastXpResetDate?.toDate() || new Date(0);
-            let dailyEarned = userData.dailyXpEarned || 0;
+            let lastReset = userData.last_xp_date ? new Date(userData.last_xp_date) : new Date(0);
+            let dailyEarned = userData.daily_xp_earned || 0;
 
             // Reset daily limits if it's a new day
             if (now.getDate() !== lastReset.getDate() || now.getMonth() !== lastReset.getMonth() || now.getFullYear() !== lastReset.getFullYear()) {
@@ -78,14 +90,14 @@ export const useGamification = () => {
             const newLevel = calculateLevel(newXp);
 
             const updates: any = {
-                xp: increment(finalAmount),
+                xp: newXp,
             };
 
             const newBadgesToAward: string[] = [];
 
             if (isWatchAction) {
-                updates.dailyXpEarned = dailyEarned + finalAmount;
-                updates.lastXpResetDate = lastReset;
+                updates.daily_xp_earned = dailyEarned + finalAmount;
+                updates.last_xp_date = lastReset.toISOString().split('T')[0];
 
                 if (!badges.includes('first_blood')) {
                     newBadgesToAward.push('first_blood');
@@ -96,7 +108,7 @@ export const useGamification = () => {
             }
 
             if (newBadgesToAward.length > 0) {
-                updates.badges = arrayUnion(...newBadgesToAward);
+                updates.badges = [...badges, ...newBadgesToAward];
             }
 
             let leveledUp = false;
@@ -105,7 +117,12 @@ export const useGamification = () => {
                 leveledUp = true;
             }
 
-            await updateDoc(userRef, updates);
+            const { error: updateError } = await supabase
+                .from('users')
+                .update(updates)
+                .eq('id', user.id);
+
+            if (updateError) throw updateError;
 
             // Show toast notifications
             newBadgesToAward.forEach((badgeId, index) => {
@@ -130,20 +147,19 @@ export const useGamification = () => {
                 });
             }
 
-            const historyRef = doc(userRef, 'xpHistory', `${Date.now()}`);
-            await setDoc(historyRef, {
+            await supabase.from('xp_history').insert({
+                user_id: user.id,
                 amount: finalAmount,
                 reason,
-                timestamp: serverTimestamp()
             });
 
         } catch (error) {
             logger.error('Failed to award XP:', error);
         }
-    }, [user, firestore, toast]);
+    }, [user, toast]);
 
     const checkDailyLogin = useCallback(async () => {
-        // Obsolete: Moved to Global Firebase Provider 
+        // Obsolete: Moved to Global Provider 
     }, []);
 
     return {

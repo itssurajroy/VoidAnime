@@ -1,11 +1,11 @@
 'use client';
+
 import { useState, useEffect, useCallback } from 'react';
-import { useUser, useFirestore } from '@/firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { createBrowserClient } from '@supabase/ssr';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import type { WatchlistItem, WatchlistStatus, AnimeCard } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { logger } from '@/lib/logger';
-import { sanitizeForFirestore } from '@/lib/firebase-utils';
 
 export interface EnhancedWatchlistItem extends WatchlistItem {
   userId?: string;
@@ -18,180 +18,263 @@ export interface EnhancedWatchlistItem extends WatchlistItem {
   updatedAt?: string;
 }
 
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!;
+const supabase = createBrowserClient(supabaseUrl, supabaseKey);
+
 export function useWatchlist() {
-    const { user } = useUser();
-    const firestore = useFirestore();
-    const { toast } = useToast();
-    const [watchlist, setWatchlist] = useState<EnhancedWatchlistItem[]>([]);
-    const [loading, setLoading] = useState(true);
+  const { user } = useSupabaseAuth();
+  const { toast } = useToast();
+  const [watchlist, setWatchlist] = useState<EnhancedWatchlistItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<any>(null);
 
-    useEffect(() => {
-        if (!user || !firestore) {
-             
-            setWatchlist([]);
-             
-            setLoading(false);
-            return;
+  const fetchWatchlist = useCallback(async () => {
+    if (!user) {
+      setWatchlist([]);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('watchlist')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (fetchError) throw fetchError;
+
+      const mappedData: EnhancedWatchlistItem[] = (data || []).map((item: any) => ({
+        id: item.anime_id, // Map anime_id to id for UI consistency
+        name: item.anime_title,
+        poster: item.anime_poster,
+        status: item.status,
+        progress: item.progress,
+        totalEpisodes: item.total_episodes,
+        userRating: item.rating,
+        notes: item.notes,
+        addedAt: item.created_at,
+        updatedAt: item.updated_at,
+        userId: item.user_id,
+        // Compatibility fields
+        jname: item.anime_title,
+      }));
+
+      setWatchlist(mappedData);
+      setError(null);
+    } catch (err: any) {
+      logger.error('[Watchlist] Error fetching watchlist:', err);
+      setError(err);
+      toast({
+        variant: 'destructive',
+        title: 'Error loading watchlist',
+        description: err.message,
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [user, toast]);
+
+  useEffect(() => {
+    if (!user) {
+      setWatchlist([]);
+      setLoading(false);
+      return;
+    }
+
+    fetchWatchlist();
+
+    // Subscribe to realtime changes for the user's watchlist
+    const channel = supabase
+      .channel('public:watchlist')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'watchlist',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          fetchWatchlist();
         }
-        
-        const q = collection(firestore, 'users', user.uid, 'watchlist');
-        
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EnhancedWatchlistItem));
-            setWatchlist(data);
-            setLoading(false);
-        }, (error) => {
-            logger.error('[Watchlist] Error fetching watchlist:', error);
-            toast({ 
-                variant: 'destructive', 
-                title: 'Error loading watchlist', 
-                description: error.message 
-            });
-            setLoading(false);
-        });
+      )
+      .subscribe();
 
-        return () => unsubscribe();
-    }, [user, firestore, toast]);
-    
-    const updateStatus = useCallback(async (animeId: string, status: WatchlistStatus) => {
-        if (!user || !firestore) {
-            return;
-        }
-        
-        const docRef = doc(firestore, 'users', user.uid, 'watchlist', animeId);
-        const updates: any = { 
-            status,
-            updatedAt: new Date().toISOString(),
-        };
-        
-        // Only set startedAt if it's the first time moving to 'WATCHING'
-        if (status === 'WATCHING' && !watchlist.find(item => item.id === animeId)?.startedAt) {
-            updates.startedAt = new Date().toISOString();
-        }
-        if (status === 'COMPLETED') {
-            updates.finishedAt = new Date().toISOString();
-        }
-        
-        try {
-            await updateDoc(docRef, updates);
-            toast({ 
-                title: 'Watchlist updated!',
-                description: `Moved to "${status.replace(/_/g, ' ')}".`
-            });
-        } catch (error: any) {
-            logger.error('[Watchlist] Error updating status:', error);
-            toast({ variant: 'destructive', title: 'Error updating status', description: error.message });
-        }
-    }, [user, firestore, toast, watchlist]);
-    
-    const removeItem = useCallback(async (animeId: string) => {
-        if (!user || !firestore) return;
-        
-        const docRef = doc(firestore, 'users', user.uid, 'watchlist', animeId);
-        try {
-            await deleteDoc(docRef);
-            toast({ title: 'Removed from watchlist' });
-        } catch (error: any) {
-            logger.error('[Watchlist] Error removing item:', error);
-            toast({ variant: 'destructive', title: 'Error removing item', description: error.message });
-        }
-    }, [user, firestore, toast]);
-
-    const addItem = useCallback(async (anime: AnimeCard, status: WatchlistStatus) => {
-        if (!user || !firestore) {
-            return;
-        }
-        
-        const docRef = doc(firestore, 'users', user.uid, 'watchlist', anime.id);
-        const newItem = sanitizeForFirestore({
-            userId: user.uid,
-            name: anime.name,
-            jname: anime.jname,
-            poster: anime.poster,
-            type: anime.type,
-            rating: anime.rating,
-            duration: anime.duration,
-            episodes: anime.episodes,
-            status,
-            progress: 0,
-            totalEpisodes: anime.episodes?.sub || anime.episodes?.dub || 0,
-            addedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            ...(status === 'WATCHING' && { startedAt: new Date().toISOString() }),
-        });
-        
-        try {
-            await setDoc(docRef, newItem);
-            toast({ 
-                title: 'Added to watchlist!',
-                description: `Added to "${status.replace(/_/g, ' ')}".`
-            });
-        } catch (error: any) {
-            logger.error('[Watchlist] Error adding item:', error);
-            toast({ variant: 'destructive', title: 'Error adding item', description: error.message });
-        }
-    }, [user, firestore, toast]);
-
-    const updateProgress = useCallback(async (animeId: string, progress: number) => {
-        if (!user || !firestore) return;
-        const docRef = doc(firestore, 'users', user.uid, 'watchlist', animeId);
-        await updateDoc(docRef, { 
-            progress,
-            updatedAt: new Date().toISOString(),
-        });
-    }, [user, firestore]);
-
-    const updateRating = useCallback(async (animeId: string, rating: number) => {
-        if (!user || !firestore) return;
-        const docRef = doc(firestore, 'users', user.uid, 'watchlist', animeId);
-        await updateDoc(docRef, { 
-            userRating: rating,
-            updatedAt: new Date().toISOString(),
-        });
-    }, [user, firestore]);
-
-    const updateNotes = useCallback(async (animeId: string, notes: string) => {
-        if (!user || !firestore) return;
-        const docRef = doc(firestore, 'users', user.uid, 'watchlist', animeId);
-        await updateDoc(docRef, { 
-            notes,
-            updatedAt: new Date().toISOString(),
-        });
-    }, [user, firestore]);
-
-    const togglePrivate = useCallback(async (animeId: string, isPrivate: boolean) => {
-        if (!user || !firestore) return;
-        const docRef = doc(firestore, 'users', user.uid, 'watchlist', animeId);
-        await updateDoc(docRef, { 
-            isPrivate,
-            updatedAt: new Date().toISOString(),
-        });
-    }, [user, firestore]);
-
-    const isInWatchlist = useCallback((animeId: string) => {
-        return watchlist.some(item => item.id === animeId);
-    }, [watchlist]);
-
-    const addToWatchlist = useCallback(async (anime: AnimeCard) => {
-        return addItem(anime, 'PLAN_TO_WATCH');
-    }, [addItem]);
-
-    const removeFromWatchlist = useCallback(async (animeId: string) => {
-        return removeItem(animeId);
-    }, [removeItem]);
-
-    return { 
-        watchlist, 
-        loading, 
-        updateStatus, 
-        removeItem, 
-        addItem,
-        updateProgress,
-        updateRating,
-        updateNotes,
-        togglePrivate,
-        isInWatchlist,
-        addToWatchlist,
-        removeFromWatchlist,
+    return () => {
+      supabase.removeChannel(channel);
     };
+  }, [user, fetchWatchlist]);
+
+  const addItem = useCallback(
+    async (anime: AnimeCard, status: WatchlistStatus) => {
+      if (!user) return;
+
+      try {
+        const { error: insertError } = await supabase.from('watchlist').insert({
+          user_id: user.id,
+          anime_id: anime.id,
+          anime_title: anime.name,
+          anime_poster: anime.poster,
+          status,
+          progress: 0,
+          total_episodes: anime.episodes?.sub || anime.episodes?.dub || 0,
+          updated_at: new Date().toISOString(),
+        });
+
+        if (insertError) throw insertError;
+
+        toast({
+          title: 'Added to watchlist!',
+          description: `Added to "${status.replace(/_/g, ' ')}".`,
+        });
+      } catch (err: any) {
+        logger.error('[Watchlist] Error adding item:', err);
+        toast({
+          variant: 'destructive',
+          title: 'Error adding item',
+          description: err.message,
+        });
+      }
+    },
+    [user, toast]
+  );
+
+  const updateItem = useCallback(
+    async (animeId: string, updates: Partial<EnhancedWatchlistItem>) => {
+      if (!user) return;
+
+      try {
+        const supabaseUpdates: any = {
+          updated_at: new Date().toISOString(),
+        };
+
+        if (updates.status) supabaseUpdates.status = updates.status;
+        if (updates.progress !== undefined) supabaseUpdates.progress = updates.progress;
+        if (updates.totalEpisodes !== undefined) supabaseUpdates.total_episodes = updates.totalEpisodes;
+        if (updates.userRating !== undefined) supabaseUpdates.rating = updates.userRating;
+        if (updates.notes !== undefined) supabaseUpdates.notes = updates.notes;
+
+        const { error: updateError } = await supabase
+          .from('watchlist')
+          .update(supabaseUpdates)
+          .eq('user_id', user.id)
+          .eq('anime_id', animeId);
+
+        if (updateError) throw updateError;
+      } catch (err: any) {
+        logger.error('[Watchlist] Error updating item:', err);
+        toast({
+          variant: 'destructive',
+          title: 'Error updating item',
+          description: err.message,
+        });
+      }
+    },
+    [user, toast]
+  );
+
+  const updateStatus = useCallback(
+    async (animeId: string, status: WatchlistStatus) => {
+      await updateItem(animeId, { status });
+      toast({
+        title: 'Watchlist updated!',
+        description: `Moved to "${status.replace(/_/g, ' ')}".`,
+      });
+    },
+    [updateItem, toast]
+  );
+
+  const updateProgress = useCallback(
+    async (animeId: string, progress: number) => {
+      await updateItem(animeId, { progress });
+    },
+    [updateItem]
+  );
+
+  const removeFromWatchlist = useCallback(
+    async (animeId: string) => {
+      if (!user) return;
+
+      try {
+        const { error: deleteError } = await supabase
+          .from('watchlist')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('anime_id', animeId);
+
+        if (deleteError) throw deleteError;
+        toast({ title: 'Removed from watchlist' });
+      } catch (err: any) {
+        logger.error('[Watchlist] Error removing item:', err);
+        toast({
+          variant: 'destructive',
+          title: 'Error removing item',
+          description: err.message,
+        });
+      }
+    },
+    [user, toast]
+  );
+
+  const isInWatchlist = useCallback(
+    (animeId: string) => {
+      return watchlist.some((item) => item.id === animeId);
+    },
+    [watchlist]
+  );
+
+  // Backward compatibility methods
+  const updateRating = useCallback(
+    async (animeId: string, rating: number) => {
+      await updateItem(animeId, { userRating: rating });
+    },
+    [updateItem]
+  );
+
+  const updateNotes = useCallback(
+    async (animeId: string, notes: string) => {
+      await updateItem(animeId, { notes });
+    },
+    [updateItem]
+  );
+
+  const togglePrivate = useCallback(
+    async (animeId: string, isPrivate: boolean) => {
+      await updateItem(animeId, { isPrivate });
+    },
+    [updateItem]
+  );
+
+  const addToWatchlist = useCallback(
+    async (anime: AnimeCard) => {
+      return addItem(anime, 'PLAN_TO_WATCH');
+    },
+    [addItem]
+  );
+
+  const removeItem = useCallback(
+    async (animeId: string) => {
+      return removeFromWatchlist(animeId);
+    },
+    [removeFromWatchlist]
+  );
+
+  return {
+    watchlist,
+    loading,
+    error,
+    updateStatus,
+    addItem,
+    updateItem,
+    updateProgress,
+    updateRating,
+    updateNotes,
+    togglePrivate,
+    isInWatchlist,
+    addToWatchlist,
+    removeFromWatchlist,
+    removeItem,
+  };
 }

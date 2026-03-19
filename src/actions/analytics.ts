@@ -1,7 +1,9 @@
 'use server';
 
-import { db } from '@/lib/firebase-admin';
+import { supabaseAdmin as _supabaseAdmin } from '@/lib/supabase-admin';
 import { revalidatePath } from 'next/cache';
+
+const supabaseAdmin = _supabaseAdmin!;
 
 export type DailyStats = {
   date: string;
@@ -59,18 +61,18 @@ async function getDaysAgo(days: number): Promise<Date> {
 }
 
 export async function getTotalViews(startDate?: string, endDate?: string): Promise<number> {
-  if (!db) return 0;
-
   try {
     const start = startDate || await getStartOfDay(await getDaysAgo(30));
     const end = endDate || await getStartOfDay(new Date());
 
-    const snapshot = await db.collection('analytics')
-      .where('timestamp', '>=', start)
-      .where('timestamp', '<=', end)
-      .get();
+    const { count, error } = await supabaseAdmin
+      .from('analytics')
+      .select('*', { count: 'exact', head: true })
+      .gte('timestamp', start)
+      .lte('timestamp', end);
 
-    return snapshot.size;
+    if (error) throw error;
+    return count || 0;
   } catch (error) {
     console.error('Error getting total views:', error);
     return 0;
@@ -78,22 +80,22 @@ export async function getTotalViews(startDate?: string, endDate?: string): Promi
 }
 
 export async function getUniqueVisitors(startDate?: string, endDate?: string): Promise<number> {
-  if (!db) return 0;
-
   try {
     const start = startDate || await getStartOfDay(await getDaysAgo(30));
     const end = endDate || await getStartOfDay(new Date());
 
-    const snapshot = await db.collection('analytics')
-      .where('event', '==', 'page_view')
-      .where('timestamp', '>=', start)
-      .where('timestamp', '<=', end)
-      .get();
+    const { data, error } = await supabaseAdmin
+      .from('analytics')
+      .select('uid')
+      .eq('event', 'page_view')
+      .gte('timestamp', start)
+      .lte('timestamp', end);
+
+    if (error) throw error;
 
     const uniqueUsers = new Set<string>();
-    snapshot.docs.forEach(doc => {
-      const data = doc.data();
-      if (data.uid) uniqueUsers.add(data.uid);
+    data?.forEach(row => {
+      if (row.uid) uniqueUsers.add(row.uid);
     });
 
     return uniqueUsers.size;
@@ -104,8 +106,6 @@ export async function getUniqueVisitors(startDate?: string, endDate?: string): P
 }
 
 export async function getDailyStats(days: number = 30): Promise<DailyStats[]> {
-  if (!db) return [];
-
   try {
     const stats: DailyStats[] = [];
     const now = new Date();
@@ -118,42 +118,32 @@ export async function getDailyStats(days: number = 30): Promise<DailyStats[]> {
       nextDate.setDate(nextDate.getDate() + 1);
       const nextDateStr = await getStartOfDay(nextDate);
 
-      const pageViewsSnapshot = await db.collection('analytics')
-        .where('event', '==', 'page_view')
-        .where('timestamp', '>=', dateStr)
-        .where('timestamp', '<', nextDateStr)
-        .get();
-
-      const watchStartSnapshot = await db.collection('analytics')
-        .where('event', '==', 'episode_watch_start')
-        .where('timestamp', '>=', dateStr)
-        .where('timestamp', '<', nextDateStr)
-        .get();
-
-      const watchCompleteSnapshot = await db.collection('analytics')
-        .where('event', '==', 'episode_watch_complete')
-        .where('timestamp', '>=', dateStr)
-        .where('timestamp', '<', nextDateStr)
-        .get();
-
-      const usersSnapshot = await db.collection('users')
-        .where('createdAt', '>=', dateStr)
-        .where('createdAt', '<', nextDateStr)
-        .get();
+      const [
+        { count: viewsCount },
+        { data: visitorsData },
+        { count: watchStartCount },
+        { count: watchCompleteCount },
+        { count: usersCount }
+      ] = await Promise.all([
+        supabaseAdmin.from('analytics').select('*', { count: 'exact', head: true }).eq('event', 'page_view').gte('timestamp', dateStr).lt('timestamp', nextDateStr),
+        supabaseAdmin.from('analytics').select('uid').eq('event', 'page_view').gte('timestamp', dateStr).lt('timestamp', nextDateStr),
+        supabaseAdmin.from('analytics').select('*', { count: 'exact', head: true }).eq('event', 'episode_watch_start').gte('timestamp', dateStr).lt('timestamp', nextDateStr),
+        supabaseAdmin.from('analytics').select('*', { count: 'exact', head: true }).eq('event', 'episode_watch_complete').gte('timestamp', dateStr).lt('timestamp', nextDateStr),
+        supabaseAdmin.from('users').select('*', { count: 'exact', head: true }).gte('created_at', dateStr).lt('created_at', nextDateStr)
+      ]);
 
       const uniqueVisitors = new Set<string>();
-      pageViewsSnapshot.docs.forEach(doc => {
-        const data = doc.data();
-        if (data.uid) uniqueVisitors.add(data.uid);
+      visitorsData?.forEach(row => {
+        if (row.uid) uniqueVisitors.add(row.uid);
       });
 
       stats.push({
         date: dateStr,
-        views: pageViewsSnapshot.size,
+        views: viewsCount || 0,
         uniqueVisitors: uniqueVisitors.size,
-        watchTimeMinutes: Math.floor(watchCompleteSnapshot.size * 24),
-        episodesWatched: watchStartSnapshot.size,
-        newUsers: usersSnapshot.size,
+        watchTimeMinutes: Math.floor((watchCompleteCount || 0) * 24),
+        episodesWatched: watchStartCount || 0,
+        newUsers: usersCount || 0,
       });
     }
 
@@ -165,18 +155,18 @@ export async function getDailyStats(days: number = 30): Promise<DailyStats[]> {
 }
 
 export async function getTopAnimeByViews(limit: number = 10): Promise<TopAnime[]> {
-  if (!db) return [];
-
   try {
+    const { data, error } = await supabaseAdmin
+      .from('analytics')
+      .select('data')
+      .eq('event', 'episode_watch_start');
+
+    if (error) throw error;
+
     const animeViews: Record<string, { title: string; views: number; watchTime: number }> = {};
 
-    const snapshot = await db.collection('analytics')
-      .where('event', '==', 'episode_watch_start')
-      .get();
-
-    snapshot.docs.forEach(doc => {
-      const data = doc.data();
-      const analyticsData = data.data as { animeId?: string; animeTitle?: string } || {};
+    data?.forEach(row => {
+      const analyticsData = row.data as { animeId?: string; animeTitle?: string } || {};
       const animeId = analyticsData.animeId || 'unknown';
       const animeTitle = analyticsData.animeTitle || 'Unknown';
 
@@ -203,23 +193,23 @@ export async function getTopAnimeByViews(limit: number = 10): Promise<TopAnime[]
 }
 
 export async function getTrafficSources(): Promise<TrafficSource[]> {
-  if (!db) return [];
-
   try {
+    const { data, error } = await supabaseAdmin
+      .from('analytics')
+      .select('uid, data')
+      .eq('event', 'page_view')
+      .limit(1000);
+
+    if (error) throw error;
+
     const direct = new Set<string>();
     const google = new Set<string>();
     const social = new Set<string>();
     const referral = new Set<string>();
 
-    const snapshot = await db.collection('analytics')
-      .where('event', '==', 'page_view')
-      .limit(1000)
-      .get();
-
-    snapshot.docs.forEach(doc => {
-      const data = doc.data();
-      const userId = data.uid || doc.id;
-      const source = (data.data as { source?: string })?.source || 'direct';
+    data?.forEach((row, index) => {
+      const userId = row.uid || index.toString();
+      const source = (row.data as { source?: string })?.source || 'direct';
 
       if (source.includes('google') || source.includes('search')) {
         google.add(userId);
@@ -247,19 +237,19 @@ export async function getTrafficSources(): Promise<TrafficSource[]> {
 }
 
 export async function getViewsByCountry(): Promise<CountryStats[]> {
-  if (!db) return [];
-
   try {
+    const { data, error } = await supabaseAdmin
+      .from('analytics')
+      .select('data')
+      .eq('event', 'page_view')
+      .limit(1000);
+
+    if (error) throw error;
+
     const countryData: Record<string, number> = {};
 
-    const snapshot = await db.collection('analytics')
-      .where('event', '==', 'page_view')
-      .limit(1000)
-      .get();
-
-    snapshot.docs.forEach(doc => {
-      const data = doc.data();
-      const country = (data.data as { country?: string })?.country || 'Unknown';
+    data?.forEach(row => {
+      const country = (row.data as { country?: string })?.country || 'Unknown';
       countryData[country] = (countryData[country] || 0) + 1;
     });
 
@@ -281,35 +271,26 @@ export async function getViewsByCountry(): Promise<CountryStats[]> {
 }
 
 export async function getEngagementMetrics(): Promise<EngagementMetrics> {
-  if (!db) {
-    return {
-      avgSessionDuration: 0,
-      bounceRate: 0,
-      pagesPerSession: 0,
-      returningUsers: 0,
-      newUsers: 0,
-    };
-  }
-
   try {
     const thirtyDaysAgo = await getDaysAgo(30);
-    const now = new Date();
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString();
 
-    const usersSnapshot = await db.collection('users')
-      .where('createdAt', '>=', thirtyDaysAgo.toISOString())
-      .get();
+    const [
+      { count: newUsers },
+      { count: totalUsers }
+    ] = await Promise.all([
+      supabaseAdmin.from('users').select('*', { count: 'exact', head: true }).gte('created_at', thirtyDaysAgoStr),
+      supabaseAdmin.from('users').select('*', { count: 'exact', head: true })
+    ]);
 
-    const newUsers = usersSnapshot.size;
-
-    const allUsersSnapshot = await db.collection('users').get();
-    const returningUsers = allUsersSnapshot.size - newUsers;
+    const returningUsers = (totalUsers || 0) - (newUsers || 0);
 
     return {
       avgSessionDuration: 15,
       bounceRate: 35,
       pagesPerSession: 3.2,
       returningUsers,
-      newUsers,
+      newUsers: newUsers || 0,
     };
   } catch (error) {
     console.error('Error getting engagement metrics:', error);
@@ -324,35 +305,25 @@ export async function getEngagementMetrics(): Promise<EngagementMetrics> {
 }
 
 export async function getRealTimeStats(): Promise<RealTimeStats> {
-  if (!db) {
-    return {
-      activeViewers: 0,
-      activeWatchRooms: 0,
-      currentApiRequests: 0,
-      latency: 0,
-    };
-  }
-
   try {
     const start = Date.now();
     const fiveMinutesAgo = new Date();
     fiveMinutesAgo.setMinutes(fiveMinutesAgo.getMinutes() - 5);
+    const fiveMinutesAgoStr = fiveMinutesAgo.toISOString();
 
-    const [activeViewsSnapshot, roomsSnapshot] = await Promise.all([
-        db.collection('analytics')
-            .where('event', '==', 'episode_watch_start')
-            .where('timestamp', '>=', fiveMinutesAgo.toISOString())
-            .get(),
-        db.collection('rooms')
-            .where('createdAt', '>=', fiveMinutesAgo.toISOString())
-            .get()
+    const [
+      { count: activeViewers },
+      { count: activeRooms }
+    ] = await Promise.all([
+      supabaseAdmin.from('analytics').select('*', { count: 'exact', head: true }).eq('event', 'episode_watch_start').gte('timestamp', fiveMinutesAgoStr),
+      supabaseAdmin.from('rooms').select('*', { count: 'exact', head: true }).gte('created_at', fiveMinutesAgoStr)
     ]);
 
     const latency = Date.now() - start;
 
     return {
-      activeViewers: activeViewsSnapshot.size,
-      activeWatchRooms: roomsSnapshot.size,
+      activeViewers: activeViewers || 0,
+      activeWatchRooms: activeRooms || 0,
       currentApiRequests: Math.floor(Math.random() * 100) + 50,
       latency,
     };
@@ -368,11 +339,10 @@ export async function getRealTimeStats(): Promise<RealTimeStats> {
 }
 
 export async function getTotalUsers(): Promise<number> {
-  if (!db) return 0;
-
   try {
-    const snapshot = await db.collection('users').count().get();
-    return snapshot.data().count || 0;
+    const { count, error } = await supabaseAdmin.from('users').select('*', { count: 'exact', head: true });
+    if (error) throw error;
+    return count || 0;
   } catch (error) {
     console.error('Error getting total users:', error);
     return 0;
@@ -380,14 +350,13 @@ export async function getTotalUsers(): Promise<number> {
 }
 
 export async function getTotalReports(): Promise<number> {
-  if (!db) return 0;
-
   try {
-    const snapshot = await db.collection('reports')
-      .where('status', '==', 'PENDING')
-      .count()
-      .get();
-    return snapshot.data().count || 0;
+    const { count, error } = await supabaseAdmin
+      .from('reports')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'PENDING');
+    if (error) throw error;
+    return count || 0;
   } catch (error) {
     console.error('Error getting total reports:', error);
     return 0;
@@ -395,11 +364,10 @@ export async function getTotalReports(): Promise<number> {
 }
 
 export async function getTotalWatchRooms(): Promise<number> {
-  if (!db) return 0;
-
   try {
-    const snapshot = await db.collection('rooms').count().get();
-    return snapshot.data().count || 0;
+    const { count, error } = await supabaseAdmin.from('rooms').select('*', { count: 'exact', head: true });
+    if (error) throw error;
+    return count || 0;
   } catch (error) {
     console.error('Error getting total watch rooms:', error);
     return 0;
@@ -432,26 +400,30 @@ export async function trackAdminAction(
   adminName: string,
   details?: any
 ) {
-  if (!db) return { success: false };
-
   try {
     const logData = {
       action,
-      targetType,
-      targetId,
-      adminId,
-      adminName,
+      target_type: targetType,
+      target_id: targetId,
+      admin_id: adminId,
+      admin_name: adminName,
       details: details || {},
       timestamp: new Date().toISOString(),
     };
 
-    await Promise.all([
-      db.collection('adminActivity').add(logData),
-      db.collection('adminAuditLogs').add({
-          ...logData,
-          ip: 'server'
-      })
+    const [
+      { error: activityError },
+      { error: auditError }
+    ] = await Promise.all([
+      supabaseAdmin.from('admin_activity').insert([logData]),
+      supabaseAdmin.from('admin_audit_logs').insert([{
+        ...logData,
+        ip: 'server'
+      }])
     ]);
+
+    if (activityError) throw activityError;
+    if (auditError) throw auditError;
 
     return { success: true };
   } catch (error) {
@@ -461,20 +433,25 @@ export async function trackAdminAction(
 }
 
 export async function getRecentActivity(limit: number = 10) {
-    if (!db) return [];
-    try {
-        const snapshot = await db.collection('adminActivity')
-            .orderBy('timestamp', 'desc')
-            .limit(limit)
-            .get();
-        
-        return snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            timestamp: doc.data().timestamp
-        }));
-    } catch (error) {
-        console.error('Error fetching activity:', error);
-        return [];
-    }
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('admin_activity')
+      .select('*')
+      .order('timestamp', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+
+    return data?.map(row => ({
+      id: row.id,
+      ...row,
+      adminName: row.admin_name,
+      targetType: row.target_type,
+      targetId: row.target_id,
+      timestamp: row.timestamp
+    })) || [];
+  } catch (error) {
+    console.error('Error fetching activity:', error);
+    return [];
+  }
 }

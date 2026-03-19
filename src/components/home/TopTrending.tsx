@@ -64,7 +64,9 @@ export function TopTrending({ top10Animes }: TopTrendingProps) {
             >
               {/* Background Poster Overlay on Hover */}
               <div className="absolute inset-0 opacity-0 group-hover/item:opacity-20 transition-all duration-1000 pointer-events-none overflow-hidden">
-                <Image src={anime.poster} alt="" fill sizes="100vw" className="object-cover blur-xl scale-110 group-hover/item:scale-100 transition-transform duration-1000" />
+                {anime.poster && (
+                  <Image src={anime.poster} alt="" fill sizes="100vw" className="object-cover blur-xl scale-110 group-hover/item:scale-100 transition-transform duration-1000" />
+                )}
                 <div className="absolute inset-0 bg-gradient-to-r from-[#0B0C10] via-[#0B0C10]/60 to-transparent" />
               </div>
 
@@ -82,7 +84,9 @@ export function TopTrending({ top10Animes }: TopTrendingProps) {
               </div>
 
               <div className="relative w-14 h-20 rounded-xl overflow-hidden shrink-0 border border-white/10 shadow-xl transition-all duration-700 group-hover/item:scale-105 group-hover/item:border-primary/50">
-                <Image src={anime.poster} alt={anime.name} fill sizes="56px" className="object-cover" />
+                {anime.poster && (
+                  <Image src={anime.poster} alt={anime.name} fill sizes="56px" className="object-cover" />
+                )}
               </div>
 
               <div className="flex-1 min-w-0 flex flex-col justify-center relative z-10">

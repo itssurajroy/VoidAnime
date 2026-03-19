@@ -22,7 +22,9 @@ export function SidebarAnimeList({ title, animes }: SidebarAnimeListProps) {
                             className="group flex gap-4 p-3 rounded-2xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 hover:border-white/10 transition-all duration-500 saas-shadow"
                         >
                             <div className="relative w-12 aspect-[2/3] rounded-xl overflow-hidden shrink-0 border border-white/5">
-                                <Image src={anime.poster} alt={anime.name} fill sizes="48px" className="object-cover group-hover:scale-110 transition-transform duration-700" />
+                                {anime.poster && (
+                                    <Image src={anime.poster} alt={anime.name} fill sizes="48px" className="object-cover group-hover:scale-110 transition-transform duration-700" />
+                                )}
                             </div>
                             <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
                                 <h4 className="text-[11px] font-black text-white uppercase tracking-tight truncate leading-tight group-hover:text-primary transition-colors">

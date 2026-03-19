@@ -1,24 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { db, auth } from '@/lib/firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 export async function POST(request: NextRequest) {
   try {
-    if (!db) {
+    if (!supabaseAdmin) {
       return NextResponse.json({ message: 'Server not configured' }, { status: 500 });
     }
 
     const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get('session')?.value;
+    const sessionCookie = cookieStore.get('sb-access-token')?.value || cookieStore.get('session')?.value;
 
     let uid = null;
     let userEmail = null;
-    if (sessionCookie && auth) {
+    if (sessionCookie) {
       try {
-        const decodedClaims = await auth.verifySessionCookie(sessionCookie);
-        uid = decodedClaims.uid;
-        userEmail = decodedClaims.email || null;
+        const { data: { user } } = await supabaseAdmin.auth.getUser(sessionCookie);
+        if (user) {
+          uid = user.id;
+          userEmail = user.email || null;
+        }
       } catch {
         // Continue without auth
       }
@@ -37,40 +38,25 @@ export async function POST(request: NextRequest) {
                request.headers.get('x-real-ip') || 
                'unknown';
 
-    const analyticsRef = db.collection('analytics').doc();
-    
     const eventData = {
       event,
       data,
-      uid,
-      userEmail,
+      user_id: uid,
+      user_email: userEmail,
       timestamp,
-      userAgent,
+      user_agent: userAgent,
       ip,
       url: data?.url || request.headers.get('referer') || '/',
-      sessionId: cookieStore.get('session_id')?.value || null,
+      session_id: cookieStore.get('session_id')?.value || null,
     };
 
-    await analyticsRef.set(eventData);
+    await supabaseAdmin.from('analytics').insert(eventData);
 
     if (uid) {
-      const userAnalyticsRef = db.collection('users').doc(uid).collection('analytics').doc(event);
-      
-      await userAnalyticsRef.set({
-        event,
-        lastTriggered: timestamp,
-        count: 0,
-      }, { merge: true });
-      
-      await userAnalyticsRef.update({
-        count: FieldValue.increment(1),
-        lastTriggered: timestamp,
-      });
-
-      const userRef = db.collection('users').doc(uid);
-      await userRef.update({
-        lastActiveAt: timestamp,
-      } as any);
+      await supabaseAdmin
+        .from('users')
+        .update({ updated_at: timestamp })
+        .eq('id', uid);
     }
 
     switch (event) {
@@ -80,17 +66,16 @@ export async function POST(request: NextRequest) {
       }
 
       case 'episode_watch_start': {
-        await updateDailyStats('episodesStarted');
+        await updateDailyStats('episodes_started');
         
         if (uid && data.animeId && data.episodeNumber) {
-          const watchSessionRef = db.collection('watchSessions').doc();
-          await watchSessionRef.set({
-            userId: uid,
-            animeId: data.animeId,
-            animeTitle: data.animeTitle,
-            episodeId: data.episodeId,
-            episodeNumber: data.episodeNumber,
-            startedAt: timestamp,
+          await supabaseAdmin.from('watch_sessions').insert({
+            user_id: uid,
+            anime_id: data.animeId,
+            anime_title: data.animeTitle,
+            episode_id: data.episodeId,
+            episode_number: data.episodeNumber,
+            started_at: timestamp,
             status: 'watching',
           });
         }
@@ -98,26 +83,25 @@ export async function POST(request: NextRequest) {
       }
 
       case 'episode_watch_complete': {
-        await updateDailyStats('episodesCompleted');
+        await updateDailyStats('episodes_completed');
         
         if (uid && data.animeId && data.episodeNumber) {
-          const watchHistoryRef = db.collection('users').doc(uid)
-            .collection('watchHistory').doc(data.episodeId);
-          
-          await watchHistoryRef.set({
-            animeId: data.animeId,
-            animeTitle: data.animeTitle,
-            episodeNumber: data.episodeNumber,
-            watchedAt: timestamp,
+          await supabaseAdmin.from('watch_history').upsert({
+            user_id: uid,
+            anime_id: data.animeId,
+            anime_title: data.animeTitle,
+            episode_number: data.episodeNumber,
+            created_at: timestamp,
             duration: data.watchDuration || 0,
-          }, { merge: true });
+            completed: true
+          }, { onConflict: 'user_id, anime_id, episode_number' });
 
-          const watchlistRef = db.collection('users').doc(uid)
-            .collection('watchlist').doc(data.animeId);
-          await watchlistRef.set({
+          await supabaseAdmin.from('watchlist').upsert({
+            user_id: uid,
+            anime_id: data.animeId,
             progress: data.episodeNumber,
-            updatedAt: timestamp,
-          }, { merge: true });
+            updated_at: timestamp,
+          }, { onConflict: 'user_id, anime_id' });
         }
         break;
       }
@@ -125,79 +109,45 @@ export async function POST(request: NextRequest) {
       case 'episode_watch_exit': {
         if (uid && data.animeId && data.episodeNumber && data.watchDuration) {
           const watchTimeMinutes = Math.floor(data.watchDuration / 60);
-          await updateDailyStats('watchTime', watchTimeMinutes);
+          await updateDailyStats('watch_time', watchTimeMinutes);
         }
         break;
       }
 
       case 'anime_added': {
         if (uid && data.animeId && data.status) {
-          const watchlistRef = db.collection('users').doc(uid)
-            .collection('watchlist').doc(data.animeId);
-          await watchlistSet({
-            animeId: data.animeId,
-            animeTitle: data.animeTitle,
-            poster: data.poster,
+          await supabaseAdmin.from('watchlist').upsert({
+            user_id: uid,
+            anime_id: data.animeId,
+            anime_title: data.animeTitle,
+            anime_poster: data.poster,
             status: data.status,
-            totalEpisodes: data.totalEpisodes || 0,
-            addedAt: timestamp,
-          });
+            total_episodes: data.totalEpisodes || 0,
+            updated_at: timestamp,
+          }, { onConflict: 'user_id, anime_id' });
         }
         break;
       }
 
       case 'status_changed': {
         if (uid && data.animeId && data.status) {
-          const watchlistRef = db.collection('users').doc(uid)
-            .collection('watchlist').doc(data.animeId);
-          await watchlistRef.update({
+          await supabaseAdmin.from('watchlist').update({
             status: data.status,
-            updatedAt: timestamp,
-          });
-        }
-        break;
-      }
-
-      case 'review_created': {
-        if (uid && data.animeId && data.rating) {
-          const reviewsRef = db.collection('users').doc(uid)
-            .collection('reviews').doc();
-          await reviewsRef.set({
-            animeId: data.animeId,
-            animeTitle: data.animeTitle,
-            animePoster: data.animePoster,
-            rating: data.rating,
-            content: data.content || '',
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          });
+            updated_at: timestamp,
+          }).eq('user_id', uid).eq('anime_id', data.animeId);
         }
         break;
       }
 
       case 'favorite_added': {
         if (uid && data.animeId) {
-          const favoritesRef = db.collection('users').doc(uid)
-            .collection('favorites').doc(data.animeId);
-          await favoritesRef.set({
-            animeId: data.animeId,
-            animeTitle: data.animeTitle,
-            poster: data.poster,
-            addedAt: timestamp,
-          });
-        }
-        break;
-      }
-
-      case 'search_query': {
-        if (data.query) {
-          const searchRef = db.collection('searches').doc();
-          await searchRef.set({
-            query: data.query,
-            resultsCount: data.resultsCount || 0,
-            userId: uid,
-            timestamp,
-          });
+          await supabaseAdmin.from('favorites').upsert({
+            user_id: uid,
+            anime_id: data.animeId,
+            anime_title: data.animeTitle,
+            anime_poster: data.poster,
+            created_at: timestamp,
+          }, { onConflict: 'user_id, anime_id' });
         }
         break;
       }
@@ -211,18 +161,6 @@ export async function POST(request: NextRequest) {
         await updateDailyStats('logins');
         break;
       }
-
-      case 'share': {
-        const shareRef = db.collection('shares').doc();
-        await shareRef.set({
-          contentType: data.contentType,
-          contentId: data.contentId,
-          platform: data.platform,
-          userId: uid,
-          timestamp,
-        });
-        break;
-      }
     }
 
     return NextResponse.json({ success: true, event });
@@ -233,45 +171,27 @@ export async function POST(request: NextRequest) {
 }
 
 async function updateDailyStats(field: string, incrementBy: number = 1) {
-  if (!db) return;
-
+  if (!supabaseAdmin) return;
   const today = new Date().toISOString().split('T')[0];
-  const dailyRef = db.collection('analytics').doc('daily').collection('stats').doc(today);
-
   try {
-    await dailyRef.set({
-      [field]: FieldValue.increment(incrementBy),
-      date: today,
-    }, { merge: true });
+    const { data: existing } = await supabaseAdmin
+      .from('daily_stats')
+      .select('*')
+      .eq('date', today)
+      .maybeSingle();
+
+    if (existing) {
+      await supabaseAdmin
+        .from('daily_stats')
+        .update({ [field]: (existing[field] || 0) + incrementBy })
+        .eq('date', today);
+    } else {
+      await supabaseAdmin
+        .from('daily_stats')
+        .insert({ date: today, [field]: incrementBy });
+    }
   } catch (error) {
     console.error('Failed to update daily stats:', error);
-  }
-}
-
-async function watchlistSet(data: {
-  animeId: string;
-  animeTitle: string;
-  poster?: string;
-  status: string;
-  totalEpisodes?: number;
-  addedAt: string;
-}) {
-  if (!db || !data.animeId) return;
-
-  try {
-    const watchlistRef = db.collection('users').doc().collection('watchlist').doc(data.animeId);
-    await watchlistRef.set({
-      id: data.animeId,
-      name: data.animeTitle,
-      poster: data.poster,
-      status: data.status,
-      progress: 0,
-      totalEpisodes: data.totalEpisodes || 0,
-      addedAt: data.addedAt,
-      updatedAt: data.addedAt,
-    });
-  } catch (error) {
-    console.error('Failed to update watchlist:', error);
   }
 }
 
@@ -279,19 +199,5 @@ export async function GET() {
   return NextResponse.json({ 
     status: 'ok', 
     message: 'Analytics tracking endpoint',
-    events: [
-      'page_view',
-      'episode_watch_start',
-      'episode_watch_complete',
-      'episode_watch_exit',
-      'anime_added',
-      'status_changed',
-      'review_created',
-      'favorite_added',
-      'search_query',
-      'signup',
-      'login',
-      'share',
-    ]
   });
 }

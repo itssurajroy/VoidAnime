@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { auth } from '@/lib/firebase-admin';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 export async function POST(request: NextRequest) {
   try {
-    const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get('session')?.value;
+    if (!supabaseAdmin) {
+      return NextResponse.json({ message: 'Server not configured' }, { status: 500 });
+    }
 
-    if (!sessionCookie || !auth) {
+    const cookieStore = await cookies();
+    const sessionCookie = cookieStore.get('sb-access-token')?.value || cookieStore.get('session')?.value;
+
+    if (!sessionCookie) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    const decodedClaims = await auth.verifySessionCookie(sessionCookie);
-    const uid = decodedClaims.uid;
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(sessionCookie);
+    if (error || !user) {
+      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
 
     const { currentPassword, newPassword } = await request.json();
 
@@ -23,27 +29,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    try {
-      const user = await auth.getUser(uid);
-      
-      if (!user.email) {
-        return NextResponse.json(
-          { message: 'User has no email' },
-          { status: 400 }
-        );
-      }
-
-      return NextResponse.json({
-        message: 'Password change requires re-authentication. Please use the client-side updatePassword function.',
-      });
-
-    } catch (error) {
-      console.error('Error changing password:', error);
-      return NextResponse.json(
-        { message: 'Failed to change password' },
-        { status: 500 }
-      );
-    }
+    return NextResponse.json({
+      message: 'Password change requires re-authentication. Please use the client-side updatePassword function.',
+    });
+    
   } catch (error) {
     console.error('Auth verification error:', error);
     return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });

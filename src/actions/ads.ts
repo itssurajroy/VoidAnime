@@ -3,9 +3,9 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import type { AdProvider, ProviderType } from '@/types/db';
-import { db } from '@/lib/firebase-admin';
+import { supabaseAdmin as _supabaseAdmin } from '@/lib/supabase-admin';
 
-// -- Mutation Actions --
+const supabaseAdmin = _supabaseAdmin!;
 
 const providerSchema = z.object({
     id: z.string().optional(),
@@ -19,7 +19,7 @@ const providerSchema = z.object({
 });
 
 export async function saveAdProvider(prevState: any, formData: FormData) {
-    if (!db) return { error: 'Database not initialized.' };
+    if (!supabaseAdmin) return { error: 'Database not initialized.' };
     const validatedFields = providerSchema.safeParse(Object.fromEntries(formData.entries()));
 
     if (!validatedFields.success) {
@@ -33,21 +33,21 @@ export async function saveAdProvider(prevState: any, formData: FormData) {
 
     try {
         if (id && id !== 'new') {
-            await db.collection('adProviders').doc(id).update({
+            await supabaseAdmin.from('ad_providers').update({
                 name,
                 type,
-                isActive,
+                is_active: isActive,
                 config: configJson,
-                updatedAt: new Date()
-            });
+                updated_at: new Date().toISOString()
+            }).eq('id', id);
         } else {
-            await db.collection('adProviders').add({
+            await supabaseAdmin.from('ad_providers').insert({
                 name,
                 type,
-                isActive,
+                is_active: isActive,
                 config: configJson,
-                createdAt: new Date(),
-                updatedAt: new Date(),
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
             });
         }
         revalidatePath('/admin/ads');
@@ -59,14 +59,18 @@ export async function saveAdProvider(prevState: any, formData: FormData) {
 }
 
 export async function deleteAdProvider(id: string) {
-    if (!db) return { error: 'Database not initialized.' };
+    if (!supabaseAdmin) return { error: 'Database not initialized.' };
     try {
-        // Check if provider is in use by any campaigns
-        const campaignsSnap = await db.collection('adCampaigns').where('providerId', '==', id).limit(1).get();
-        if (!campaignsSnap.empty) {
+        const { count } = await supabaseAdmin
+            .from('ad_campaigns')
+            .select('*', { count: 'exact', head: true })
+            .eq('provider_id', id);
+            
+        if (count && count > 0) {
             return { error: 'Failed to delete provider. It may be linked to existing campaigns.' };
         }
-        await db.collection('adProviders').doc(id).delete();
+        
+        await supabaseAdmin.from('ad_providers').delete().eq('id', id);
         revalidatePath('/admin/ads');
         return { success: true, message: 'Provider deleted.' };
     } catch (error) {

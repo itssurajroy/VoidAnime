@@ -1,4 +1,283 @@
-import type { AniListMedia } from "@/types";
+import type { 
+  AniListMedia, 
+  AnilistCharacter, 
+  AnilistRelated, 
+  AnilistAiringSchedule,
+  SearchResultsData 
+} from "@/types";
+
+const KENJITSU_API = 'https://kenjitsu-api.vercel.app/api';
+
+/* =========================
+   SEARCH (AniList via Kenjitsu)
+========================= */
+
+export const searchAniList = async (query: string, page: number = 1): Promise<{ status: number; data: SearchResultsData }> => {
+  try {
+    const res = await fetch(
+      `${KENJITSU_API}/anilist/anime/search?q=${encodeURIComponent(query)}&page=${page}`,
+      { next: { revalidate: 3600 } }
+    );
+    
+    if (!res.ok) return { status: res.status, data: { animes: [], currentPage: 1, totalPages: 1, hasNextPage: false } };
+    
+    const json = await res.json();
+    return { 
+      status: 200, 
+      data: {
+        animes: json.data?.map((item: any) => ({
+          id: item.anilistId?.toString() || '',
+          name: item.title?.romaji || item.title?.english || '',
+          poster: item.image || item.bannerImage || '',
+          type: item.format || '',
+          rating: item.score?.toString() || '',
+          episodes: { sub: item.episodes || 0, dub: 0 }
+        })) || [],
+        currentPage: json.currentPage || 1,
+        totalPages: json.lastPage || 1,
+        hasNextPage: json.hasNextPage || false
+      }
+    };
+  } catch (error) {
+    console.error("AniList search error:", error);
+    return { status: 500, data: { animes: [], currentPage: 1, totalPages: 1, hasNextPage: false } };
+  }
+};
+
+/* =========================
+   TOP ANIME (AniList via Kenjitsu)
+========================= */
+
+export const getTopAniList = async (
+  category: 'airing' | 'trending' | 'upcoming' | 'rating' | 'popular' = 'popular',
+  format: string = 'TV',
+  page: number = 1
+): Promise<{ status: number; data: SearchResultsData }> => {
+  try {
+    const res = await fetch(
+      `${KENJITSU_API}/anilist/anime/top/${category}?format=${format}&page=${page}`,
+      { next: { revalidate: 3600 } }
+    );
+    
+    if (!res.ok) return { status: res.status, data: { animes: [], currentPage: 1, totalPages: 1, hasNextPage: false } };
+    
+    const json = await res.json();
+    return { 
+      status: 200, 
+      data: {
+        animes: json.data?.map((item: any) => ({
+          id: item.anilistId?.toString() || '',
+          name: item.title?.romaji || item.title?.english || '',
+          poster: item.image || item.bannerImage || '',
+          type: item.format || '',
+          rating: item.score?.toString() || '',
+          episodes: { sub: item.episodes || 0, dub: 0 }
+        })) || [],
+        currentPage: json.currentPage || 1,
+        totalPages: json.lastPage || 1,
+        hasNextPage: json.hasNextPage || false
+      }
+    };
+  } catch (error) {
+    console.error("AniList top anime error:", error);
+    return { status: 500, data: { animes: [], currentPage: 1, totalPages: 1, hasNextPage: false } };
+  }
+};
+
+/* =========================
+   SEASONAL ANIME (AniList via Kenjitsu)
+========================= */
+
+export const getSeasonalAniList = async (
+  season: 'SPRING' | 'SUMMER' | 'FALL' | 'WINTER',
+  year: number,
+  format: string = 'TV',
+  page: number = 1
+): Promise<{ status: number; data: SearchResultsData }> => {
+  try {
+    const res = await fetch(
+      `${KENJITSU_API}/anilist/seasons/${season}/${year}?format=${format}&page=${page}`,
+      { next: { revalidate: 3600 } }
+    );
+    
+    if (!res.ok) return { status: res.status, data: { animes: [], currentPage: 1, totalPages: 1, hasNextPage: false } };
+    
+    const json = await res.json();
+    return { 
+      status: 200, 
+      data: {
+        animes: json.data?.map((item: any) => ({
+          id: item.anilistId?.toString() || '',
+          name: item.title?.romaji || item.title?.english || '',
+          poster: item.image || item.bannerImage || '',
+          type: item.format || '',
+          rating: item.score?.toString() || '',
+          episodes: { sub: item.episodes || 0, dub: 0 }
+        })) || [],
+        currentPage: json.currentPage || 1,
+        totalPages: json.lastPage || 1,
+        hasNextPage: json.hasNextPage || false
+      }
+    };
+  } catch (error) {
+    console.error("AniList seasonal error:", error);
+    return { status: 500, data: { animes: [], currentPage: 1, totalPages: 1, hasNextPage: false } };
+  }
+};
+
+/* =========================
+   ANIME DETAILS (AniList via Kenjitsu)
+========================= */
+
+export const getAniListDetails = async (anilistId: number): Promise<{ status: number; data: AniListMedia | null }> => {
+  try {
+    const res = await fetch(
+      `${KENJITSU_API}/anilist/anime/${anilistId}`,
+      { next: { revalidate: 3600 } }
+    );
+    
+    if (!res.ok) return { status: res.status, data: null };
+    
+    const json = await res.json();
+    return { 
+      status: 200, 
+      data: json.data || null
+    };
+  } catch (error) {
+    console.error("AniList details error:", error);
+    return { status: 500, data: null };
+  }
+};
+
+/* =========================
+   CHARACTERS (AniList via Kenjitsu)
+========================= */
+
+export const getAniListCharacters = async (anilistId: number): Promise<{ status: number; data: AnilistCharacter | null }> => {
+  try {
+    const res = await fetch(
+      `${KENJITSU_API}/anilist/anime/${anilistId}/characters`,
+      { next: { revalidate: 3600 } }
+    );
+    
+    if (!res.ok) return { status: res.status, data: null };
+    
+    const json = await res.json();
+    return { 
+      status: 200, 
+      data: json.data || null
+    };
+  } catch (error) {
+    console.error("AniList characters error:", error);
+    return { status: 500, data: null };
+  }
+};
+
+/* =========================
+   RELATED ANIME (AniList via Kenjitsu)
+========================= */
+
+export const getAniListRelated = async (anilistId: number): Promise<{ status: number; data: AnilistRelated | null }> => {
+  try {
+    const res = await fetch(
+      `${KENJITSU_API}/anilist/anime/${anilistId}/related`,
+      { next: { revalidate: 3600 } }
+    );
+    
+    if (!res.ok) return { status: res.status, data: null };
+    
+    const json = await res.json();
+    return { 
+      status: 200, 
+      data: json.data || null
+    };
+  } catch (error) {
+    console.error("AniList related error:", error);
+    return { status: 500, data: null };
+  }
+};
+
+/* =========================
+   AIRING SCHEDULE (AniList via Kenjitsu)
+========================= */
+
+export const getAniListSchedule = async (date: string): Promise<{ status: number; data: AnilistAiringSchedule }> => {
+  try {
+    const res = await fetch(
+      `${KENJITSU_API}/anilist/airing/date/${date}`,
+      { next: { revalidate: 1800 } }
+    );
+    
+    if (!res.ok) return { status: res.status, data: { hasNextPage: false, currentPage: 1, total: 0, lastPage: 1, perPage: 20, data: [] } };
+    
+    const json = await res.json();
+    return { 
+      status: 200, 
+      data: json || { hasNextPage: false, currentPage: 1, total: 0, lastPage: 1, perPage: 20, data: [] }
+    };
+  } catch (error) {
+    console.error("AniList schedule error:", error);
+    return { status: 500, data: { hasNextPage: false, currentPage: 1, total: 0, lastPage: 1, perPage: 20, data: [] } };
+  }
+};
+
+/* =========================
+   PROVIDER MAPPINGS (AniList to Streaming)
+========================= */
+
+export const getAniListMappings = async (
+  anilistId: number, 
+  provider: 'kaido' | 'hianime' | 'animepahe' | 'anizone' = 'kaido'
+): Promise<{ status: number; data: any }> => {
+  try {
+    const res = await fetch(
+      `${KENJITSU_API}/anilist/mappings/${anilistId}?provider=${provider}`,
+      { next: { revalidate: 3600 } }
+    );
+    
+    if (!res.ok) return { status: res.status, data: null };
+    
+    const json = await res.json();
+    return { 
+      status: 200, 
+      data: json.data || null
+    };
+  } catch (error) {
+    console.error("AniList mappings error:", error);
+    return { status: 500, data: null };
+  }
+};
+
+/* =========================
+   PROVIDER EPISODES (via AniList)
+========================= */
+
+export const getAniListEpisodes = async (
+  anilistId: number, 
+  provider: 'kaido' | 'hianime' | 'animepahe' | 'anizone' = 'kaido'
+): Promise<{ status: number; data: any }> => {
+  try {
+    const res = await fetch(
+      `${KENJITSU_API}/anilist/episodes/${anilistId}?provider=${provider}`,
+      { next: { revalidate: 3600 } }
+    );
+    
+    if (!res.ok) return { status: res.status, data: null };
+    
+    const json = await res.json();
+    return { 
+      status: 200, 
+      data: json.data || null
+    };
+  } catch (error) {
+    console.error("AniList episodes error:", error);
+    return { status: 500, data: null };
+  }
+};
+
+/* =========================
+   LEGACY: Direct AniList GraphQL (kept for compatibility)
+========================= */
 
 const ANILIST_API_URL = 'https://graphql.anilist.co';
 
@@ -90,16 +369,6 @@ query ($search: String) {
         }
       }
     }
-    stats {
-      statusDistribution {
-        status
-        amount
-      }
-      scoreDistribution {
-        score
-        amount
-      }
-    }
     externalLinks {
       id
       url
@@ -130,20 +399,6 @@ query ($search: String) {
         }
       }
     }
-    staff (perPage: 15) {
-      edges {
-        role
-        node {
-          id
-          name {
-            full
-          }
-          image {
-            large
-          }
-        }
-      }
-    }
   }
 }
 `;
@@ -160,14 +415,10 @@ export async function getAniListExtras(animeName: string): Promise<AniListMedia 
         query: extrasQuery,
         variables: { search: animeName },
       }),
-      // Use a short cache time for server-side fetches to avoid stale data
-      // but still benefit from some caching.
       next: { revalidate: 3600 },
     });
 
     if (!response.ok) {
-      // It's common for an anime not to be found on AniList, so a 404 is not a critical error.
-      // We'll log other errors, but not 404s.
       if (response.status !== 404) {
         console.error("AniList API error:", response.status, await response.text());
       }
@@ -185,65 +436,5 @@ export async function getAniListExtras(animeName: string): Promise<AniListMedia 
   } catch (error) {
     console.error("Error fetching from AniList:", error);
     return null;
-  }
-}
-
-const scheduleQuery = `
-query ($weekStart: Int, $weekEnd: Int, $page: Int) {
-  Page (page: $page) {
-    pageInfo {
-      hasNextPage
-    }
-    airingSchedules (airingAt_greater: $weekStart, airingAt_less: $weekEnd, sort: TIME) {
-      id
-      airingAt
-      episode
-      media {
-        id
-        idMal
-        title {
-          romaji
-          english
-          native
-        }
-        coverImage {
-          large
-        }
-        format
-        status
-      }
-    }
-  }
-}
-`;
-
-export async function getAniListSchedule(weekStart: number, weekEnd: number, page: number = 1): Promise<any[]> {
-  try {
-    const response = await fetch(ANILIST_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({
-        query: scheduleQuery,
-        variables: { weekStart, weekEnd, page },
-      }),
-      next: { revalidate: 1800 },
-    });
-
-    if (!response.ok) return [];
-    const json = await response.json();
-    const schedules = json.data.Page.airingSchedules;
-    
-    if (json.data.Page.pageInfo.hasNextPage && page < 3) { // Limit to 3 pages to avoid excessive fetching
-        const nextSchedules = await getAniListSchedule(weekStart, weekEnd, page + 1);
-        return [...schedules, ...nextSchedules];
-    }
-
-    return schedules;
-  } catch (error) {
-    console.error("Error fetching AniList schedule:", error);
-    return [];
   }
 }

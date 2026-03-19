@@ -1,32 +1,16 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useUser, useFirestore } from '@/firebase';
-import { 
-  collection, 
-  doc, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  onSnapshot, 
-  query, 
-  orderBy,
-  limit,
-  serverTimestamp,
-  getDoc,
-  getDocs,
-  setDoc,
-  increment
-} from 'firebase/firestore';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
+import { supabase as _supabase } from '@/lib/supabase';
 import type { Room, RoomParticipant, RoomChatMessage, PlaybackState, RoomState } from '@/types/room';
 
-const ROOMS_COLLECTION = 'rooms';
-const MAX_PARTICIPANTS_DEFAULT = 10;
+const supabase = _supabase!;
+
 const SYNC_INTERVAL_MS = 2000;
 
 export function useWatchRoom() {
-  const { user } = useUser();
-  const firestore = useFirestore();
+  const { user } = useSupabaseAuth();
   
   const [roomState, setRoomState] = useState<RoomState>({
     room: null,
@@ -38,13 +22,9 @@ export function useWatchRoom() {
   });
 
   const roomIdRef = useRef<string | null>(null);
-  const unsubscribersRef = useRef<(() => void)[]>([]);
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const clearRoom = useCallback(() => {
-    unsubscribersRef.current.forEach(unsub => unsub());
-    unsubscribersRef.current = [];
-    
     if (syncIntervalRef.current) {
       clearInterval(syncIntervalRef.current);
       syncIntervalRef.current = null;
@@ -61,6 +41,51 @@ export function useWatchRoom() {
     });
   }, []);
 
+  const fetchRoomData = useCallback(async (roomId: string) => {
+    const [roomRes, participantsRes, messagesRes] = await Promise.all([
+      supabase.from('rooms').select('*').eq('id', roomId).single(),
+      supabase.from('room_participants').select('*').eq('room_id', roomId),
+      supabase.from('room_chat').select('*').eq('room_id', roomId).order('timestamp', { ascending: true }).limit(100)
+    ]);
+
+    if (roomRes.data) {
+      const roomData = roomRes.data;
+      setRoomState(prev => ({
+        ...prev,
+        room: {
+          id: roomData.id,
+          animeId: roomData.anime_id,
+          episodeId: roomData.episode_id,
+          animeTitle: roomData.anime_title,
+          animePoster: roomData.anime_poster,
+          episodeNumber: roomData.episode_number,
+          hostId: roomData.host_id,
+          hostName: roomData.host_name,
+          isPlaying: roomData.is_playing,
+          currentTime: roomData.current_time,
+          participantCount: roomData.participant_count,
+        } as any, // Cast to Room type
+        isHost: roomData.host_id === user?.id,
+        participants: (participantsRes.data || []).map(p => ({
+          id: p.user_id,
+          displayName: p.display_name,
+          avatarUrl: p.avatar_url,
+          isHost: p.is_host,
+          isReady: p.is_ready,
+          joinedAt: p.joined_at,
+        })),
+        messages: (messagesRes.data || []).map(m => ({
+          id: m.id,
+          userId: m.user_id,
+          displayName: m.display_name,
+          avatarUrl: m.avatar_url,
+          message: m.message,
+          timestamp: m.timestamp,
+        })),
+      }));
+    }
+  }, [user]);
+
   const createRoom = useCallback(async (
     animeId: string,
     episodeId: string,
@@ -70,140 +95,93 @@ export function useWatchRoom() {
     category?: 'sub' | 'dub',
     animePoster?: string
   ): Promise<string> => {
-    if (!user || !firestore) {
-      throw new Error('User must be logged in to create a room');
+    if (!user) {
+      throw new Error('User must be logged in to create a party');
     }
 
-    const roomsRef = collection(firestore, ROOMS_COLLECTION);
-    
-     
-    const roomData: any = {
-      animeId,
-      episodeId,
-      animeTitle,
-      animePoster,
-      episodeNumber,
-      hostId: user.uid,
-      hostName: user.displayName || 'Anonymous',
-      createdAt: new Date(),
-      createdBy: user.uid,
-      isPlaying: false,
-      currentTime: 0,
-      updatedAt: new Date(),
-      maxParticipants: MAX_PARTICIPANTS_DEFAULT,
-      participantCount: 1,
-    };
+    const { data: room, error: roomError } = await supabase.from('rooms').insert({
+      anime_id: animeId,
+      episode_id: episodeId,
+      anime_title: animeTitle,
+      anime_poster: animePoster,
+      episode_number: episodeNumber,
+      host_id: user.id,
+      host_name: user.user_metadata?.username || 'Anonymous',
+      is_playing: false,
+      current_time: 0,
+      participant_count: 1,
+      server_id: serverId,
+      category: category,
+    }).select().single();
 
-    if (serverId) {
-        roomData.serverId = serverId;
-    }
-    if (category) {
-        roomData.category = category;
-    }
+    if (roomError) throw roomError;
 
-    // Use addDoc for collection to get proper document reference
-    const newRoomRef = await addDoc(roomsRef, roomData);
-    const newRoomId = newRoomRef.id;
+    await supabase.from('room_participants').insert({
+      room_id: room.id,
+      user_id: user.id,
+      display_name: user.user_metadata?.username || 'Anonymous',
+      avatar_url: user.user_metadata?.avatar_url,
+      is_host: true,
+      is_ready: false,
+    });
 
-     
-    const participantData: any = {
-      displayName: user.displayName || 'Anonymous',
-      avatarUrl: user.photoURL,
-      joinedAt: new Date(),
-      isHost: true,
-      isReady: false,
-    };
-
-    const participantRef = doc(firestore, ROOMS_COLLECTION, newRoomId, 'participants', user.uid);
-    await setDoc(participantRef, participantData);
-
-    roomIdRef.current = newRoomId;
+    roomIdRef.current = room.id;
     setRoomState(prev => ({
       ...prev,
       status: 'connected',
       isHost: true,
     }));
 
-    return newRoomId;
-  }, [user, firestore]);
+    return room.id;
+  }, [user]);
 
   const joinRoom = useCallback(async (roomId: string) => {
-    if (!user || !firestore) {
-      throw new Error('User must be logged in to join a room');
+    if (!user) {
+      throw new Error('User must be logged in to join a party');
     }
 
     setRoomState(prev => ({ ...prev, status: 'connecting', error: null }));
 
     try {
-      const roomRef = doc(firestore, ROOMS_COLLECTION, roomId);
-      const roomSnap = await getDoc(roomRef);
-      
-      if (!roomSnap.exists()) {
-        throw new Error('Room not found');
-      }
+      const { data: room, error: roomError } = await supabase.from('rooms').select('*').eq('id', roomId).single();
+      if (roomError || !room) throw new Error('Party not found');
 
-      const roomData = roomSnap.data() as Room;
-
-      const participantRef = doc(firestore, ROOMS_COLLECTION, roomId, 'participants', user.uid);
-      const participantSnap = await getDoc(participantRef);
+      const { data: participant } = await supabase.from('room_participants')
+        .select('*')
+        .eq('room_id', roomId)
+        .eq('user_id', user.id)
+        .single();
       
-      if (participantSnap.exists()) {
-        await updateDoc(participantRef, { joinedAt: new Date() });
+      if (participant) {
+        await supabase.from('room_participants').update({ joined_at: new Date().toISOString() })
+          .eq('room_id', roomId)
+          .eq('user_id', user.id);
       } else {
-         
-        const participantData: any = {
-          displayName: user.displayName || 'Anonymous',
-          avatarUrl: user.photoURL,
-          joinedAt: new Date(),
-          isHost: false,
-          isReady: true,
-        };
-        await setDoc(participantRef, participantData);
-        // Increment count for new participant
-        await updateDoc(roomRef, { participantCount: increment(1) });
+        await supabase.from('room_participants').insert({
+          room_id: roomId,
+          user_id: user.id,
+          display_name: user.user_metadata?.username || 'Anonymous',
+          avatar_url: user.user_metadata?.avatar_url,
+          is_host: false,
+          is_ready: true,
+        });
+        await supabase.from('rooms').update({ participant_count: (room.participant_count || 0) + 1 }).eq('id', roomId);
       }
 
       roomIdRef.current = roomId;
-      
-      const unsubRoom = onSnapshot(roomRef, (snap) => {
-        if (snap.exists()) {
-          const data = snap.data() as Room;
-          // Remove id from data to avoid duplication
-          const { id: _dataId, ...restData } = data;
-          setRoomState(prev => ({
-            ...prev,
-            room: { id: snap.id, ...restData },
-            status: 'connected',
-          }));
-        }
-      });
-      unsubscribersRef.current.push(unsubRoom);
+      await fetchRoomData(roomId);
 
-      const participantsRef = collection(firestore, ROOMS_COLLECTION, roomId, 'participants');
-      const unsubParticipants = onSnapshot(participantsRef, (snapshot) => {
-        const participants = snapshot.docs.map(d => ({
-          id: d.id,
-          ...d.data()
-        } as RoomParticipant));
-        setRoomState(prev => ({ ...prev, participants }));
-      });
-      unsubscribersRef.current.push(unsubParticipants);
-
-      const messagesRef = collection(firestore, ROOMS_COLLECTION, roomId, 'chat');
-      const q = query(messagesRef, orderBy('timestamp', 'asc'), limit(100));
-      const unsubMessages = onSnapshot(q, (snapshot) => {
-        const messages = snapshot.docs.map(d => ({
-          id: d.id,
-          ...d.data()
-        } as RoomChatMessage));
-        setRoomState(prev => ({ ...prev, messages }));
-      });
-      unsubscribersRef.current.push(unsubMessages);
+      const channel = supabase
+        .channel(`room:${roomId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, () => fetchRoomData(roomId))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'room_participants', filter: `room_id=eq.${roomId}` }, () => fetchRoomData(roomId))
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_chat', filter: `room_id=eq.${roomId}` }, () => fetchRoomData(roomId))
+        .subscribe();
 
       setRoomState(prev => ({
         ...prev,
         status: 'connected',
-        isHost: roomData.hostId === user.uid,
+        isHost: room.host_id === user.id,
       }));
 
       return roomId;
@@ -211,52 +189,38 @@ export function useWatchRoom() {
       setRoomState(prev => ({ 
         ...prev, 
         status: 'error', 
-        error: error instanceof Error ? error.message : 'Failed to join room' 
+        error: error instanceof Error ? error.message : 'Failed to join party' 
       }));
       throw error;
     }
-  }, [user, firestore]);
+  }, [user, fetchRoomData]);
 
   const leaveRoom = useCallback(async () => {
-    if (!user || !firestore || !roomIdRef.current) return;
+    if (!user || !roomIdRef.current) return;
 
     const roomId = roomIdRef.current;
     
     try {
-      const roomRef = doc(firestore, ROOMS_COLLECTION, roomId);
-      const participantRef = doc(firestore, ROOMS_COLLECTION, roomId, 'participants', user.uid);
-      await deleteDoc(participantRef);
+      await supabase.from('room_participants').delete().eq('room_id', roomId).eq('user_id', user.id);
       
-      const roomSnap = await getDoc(roomRef);
+      const { data: room } = await supabase.from('rooms').select('*').eq('id', roomId).single();
       
-      if (roomSnap.exists()) {
-        const roomData = roomSnap.data() as Room;
-        const currentCount = roomData.participantCount || 0;
-
-        if (currentCount <= 1) {
-          await deleteDoc(roomRef);
+      if (room) {
+        if ((room.participant_count || 0) <= 1) {
+          await supabase.from('rooms').delete().eq('id', roomId);
         } else {
-          // Decrement count
-          await updateDoc(roomRef, { 
-            participantCount: increment(-1),
-            updatedAt: serverTimestamp()
-          });
+          await supabase.from('rooms').update({ 
+            participant_count: room.participant_count - 1,
+            updated_at: new Date().toISOString()
+          }).eq('id', roomId);
 
-          // Handover host if leaving user was host
-          if (roomData.hostId === user.uid) {
-            const participantsRef = collection(firestore, ROOMS_COLLECTION, roomId, 'participants');
-            const participantsSnap = await getDocs(participantsRef);
-            const participants = participantsSnap.docs.map(d => ({
-              id: d.id,
-              ...d.data()
-            } as RoomParticipant));
-            
-            if (participants.length > 0) {
-              const newHost = participants[0];
-              await updateDoc(roomRef, { 
-                hostId: newHost.id,
-                hostName: newHost.displayName
-              });
+          if (room.host_id === user.id) {
+            const { data: nextParticipants } = await supabase.from('room_participants').select('*').eq('room_id', roomId).limit(1);
+            if (nextParticipants && nextParticipants.length > 0) {
+              await supabase.from('rooms').update({ 
+                host_id: nextParticipants[0].user_id,
+                host_name: nextParticipants[0].display_name
+              }).eq('id', roomId);
             }
           }
         }
@@ -266,81 +230,75 @@ export function useWatchRoom() {
     } finally {
       clearRoom();
     }
-  }, [user, firestore, clearRoom]);
+  }, [user, clearRoom]);
 
   const updatePlaybackState = useCallback(async (state: Partial<PlaybackState>) => {
-    if (!user || !firestore || !roomIdRef.current || !roomState.isHost) return;
+    if (!user || !roomIdRef.current || !roomState.isHost) return;
 
-    const roomRef = doc(firestore, ROOMS_COLLECTION, roomIdRef.current);
-    
     try {
-      await updateDoc(roomRef, {
-        ...state,
-        updatedAt: serverTimestamp(),
-      });
+      await supabase.from('rooms').update({
+        is_playing: state.isPlaying,
+        current_time: state.currentTime,
+        updated_at: new Date().toISOString(),
+      }).eq('id', roomIdRef.current);
     } catch (error) {
       console.error('Error updating playback state:', error);
     }
-  }, [user, firestore, roomState.isHost]);
+  }, [user, roomState.isHost]);
 
   const syncPlaybackState = useCallback(async () => {
-    if (!user || !firestore || !roomIdRef.current || roomState.isHost) return;
+    if (!user || !roomIdRef.current || roomState.isHost) return;
     if (!roomState.room) return;
 
-    const roomRef = doc(firestore, ROOMS_COLLECTION, roomIdRef.current);
-    const roomSnap = await getDoc(roomRef);
+    const { data: room } = await supabase.from('rooms').select('current_time, is_playing').eq('id', roomIdRef.current).single();
     
-    if (roomSnap.exists()) {
-      const data = roomSnap.data() as Room;
+    if (room) {
       setRoomState(prev => ({
         ...prev,
-        room: { ...prev.room!, currentTime: data.currentTime, isPlaying: data.isPlaying },
+        room: { ...prev.room!, currentTime: room.current_time, isPlaying: room.is_playing } as any,
       }));
     }
-  }, [user, firestore, roomState.isHost, roomState.room]);
+  }, [user, roomState.isHost, roomState.room]);
 
   const sendMessage = useCallback(async (message: string) => {
-    if (!user || !firestore || !roomIdRef.current || !message.trim()) return;
+    if (!user || !roomIdRef.current || !message.trim()) return;
 
-    const messagesRef = collection(firestore, ROOMS_COLLECTION, roomIdRef.current, 'chat');
-    
-    await addDoc(messagesRef, {
-      userId: user.uid,
-      displayName: user.displayName || 'Anonymous',
-      avatarUrl: user.photoURL,
+    await supabase.from('room_chat').insert({
+      room_id: roomIdRef.current,
+      user_id: user.id,
+      display_name: user.user_metadata?.username || 'Anonymous',
+      avatar_url: user.user_metadata?.avatar_url,
       message: message.trim(),
-      timestamp: serverTimestamp(),
     });
-  }, [user, firestore]);
+  }, [user]);
 
   const kickParticipant = useCallback(async (participantId: string) => {
-    if (!user || !firestore || !roomIdRef.current || !roomState.isHost) return;
+    if (!user || !roomIdRef.current || !roomState.isHost) return;
     
     try {
-      const roomRef = doc(firestore, ROOMS_COLLECTION, roomIdRef.current);
-      const participantRef = doc(firestore, ROOMS_COLLECTION, roomIdRef.current, 'participants', participantId);
-      await deleteDoc(participantRef);
-      await updateDoc(roomRef, { participantCount: increment(-1) });
+      await supabase.from('room_participants').delete().eq('room_id', roomIdRef.current).eq('user_id', participantId);
+      const { data: room } = await supabase.from('rooms').select('participant_count').eq('id', roomIdRef.current).single();
+      if (room) {
+        await supabase.from('rooms').update({ participant_count: room.participant_count - 1 }).eq('id', roomIdRef.current);
+      }
     } catch (error) {
       console.error('Error kicking participant:', error);
     }
-  }, [user, firestore, roomState.isHost]);
+  }, [user, roomState.isHost]);
 
   const togglePlayPause = useCallback(async () => {
-    if (!user || !firestore || !roomIdRef.current || !roomState.isHost || !roomState.room) return;
+    if (!user || !roomIdRef.current || !roomState.isHost || !roomState.room) return;
     
     const newIsPlaying = !roomState.room.isPlaying;
-    const roomRef = doc(firestore, ROOMS_COLLECTION, roomIdRef.current);
-    
     try {
-      await updateDoc(roomRef, {
-        isPlaying: newIsPlaying,
-        updatedAt: serverTimestamp(),
-      });
+      await supabase.from('rooms').update({
+        is_playing: newIsPlaying,
+        updated_at: new Date().toISOString(),
+      }).eq('id', roomIdRef.current);
     } catch (error) {
       console.error('Error toggling play/pause:', error);
     }
-  }, [user, firestore, roomState.isHost, roomState.room]);
+  }, [user, roomState.isHost, roomState.room]);
 
   useEffect(() => {
     if (roomState.status === 'connected' && !roomState.isHost && roomIdRef.current) {

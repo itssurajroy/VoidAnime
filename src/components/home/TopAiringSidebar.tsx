@@ -24,7 +24,9 @@ export function TopAiringSidebar({ animes }: TopAiringSidebarProps) {
               className="group flex gap-4 p-4 hover:bg-white/[0.03] border-b border-white/5 last:border-0 transition-colors"
             >
               <div className="relative w-16 aspect-[2/3] rounded-md overflow-hidden shrink-0 border border-white/5">
-                <Image src={anime.poster} alt={anime.name} fill sizes="64px" className="object-cover group-hover:scale-110 transition-transform duration-500" />
+                {anime.poster && (
+                  <Image src={anime.poster} alt={anime.name} fill sizes="64px" className="object-cover group-hover:scale-110 transition-transform duration-500" />
+                )}
                 <div className="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                   <Play className="w-5 h-5 text-white fill-current" />
                 </div>

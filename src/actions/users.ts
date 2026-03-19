@@ -2,8 +2,10 @@
 
 import { revalidatePath } from 'next/cache';
 import type { UserRole, UserStatus } from '@/types/db';
-import { db, auth } from '@/lib/firebase-admin';
+import { supabaseAdmin as _supabaseAdmin } from '@/lib/supabase-admin';
 import { verifyAdminAction } from '@/lib/auth-utils';
+
+const supabaseAdmin = _supabaseAdmin!;
 
 async function updateUser(userId: string, data: { role?: UserRole, status?: UserStatus }) {
     const isAdmin = await verifyAdminAction();
@@ -11,21 +13,32 @@ async function updateUser(userId: string, data: { role?: UserRole, status?: User
         return { success: false, error: 'Unauthorized.' };
     }
 
-    if (!db || !auth) {
-        return { success: false, error: 'Firebase Admin not initialized.' };
-    }
     if (!userId) {
         return { success: false, error: 'User ID is required.' };
     }
 
     try {
-        const userRef = db.collection('users').doc(userId);
-        await userRef.update(data);
+        const mappedData: any = {
+            updated_at: new Date().toISOString()
+        };
+        if (data.role) mappedData.role = data.role;
+        if (data.status) mappedData.status = data.status;
+
+        const { error: tableError } = await supabaseAdmin
+            .from('users')
+            .update(mappedData)
+            .eq('id', userId);
         
-        // Also update Firebase Auth disabled status if status is changed
+        if (tableError) throw tableError;
+        
+        // Also update Supabase Auth ban status if status is changed
         if (data.status) {
-            const isDisabled = data.status === 'BANNED';
-            await auth.updateUser(userId, { disabled: isDisabled });
+            const isBanned = data.status === 'BANNED';
+            if (isBanned) {
+                await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: '8760h' });
+            } else {
+                await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: 'none' });
+            }
         }
 
         revalidatePath('/admin/users');
@@ -50,11 +63,11 @@ export async function updateUserStatus(userId: string, status: UserStatus, reaso
     const result = await updateUser(userId, { status });
     if (!result.success) return { success: false, error: result.error };
 
-    if (status === 'BANNED' && reason && db) {
-        await db.collection('bannedUsers').add({
-            userId,
+    if (status === 'BANNED' && reason) {
+        await supabaseAdmin.from('banned_users').insert({
+            user_id: userId,
             reason,
-            bannedAt: new Date().toISOString(),
+            banned_at: new Date().toISOString(),
             status: 'ACTIVE'
         });
     }
@@ -66,13 +79,14 @@ export async function toggleShadowBan(userId: string, shadowBanned: boolean) {
     const isAdmin = await verifyAdminAction();
     if (!isAdmin) return { success: false, error: 'Unauthorized.' };
 
-    if (!db) return { success: false, error: 'Database not configured' };
-
     try {
-        await db.collection('users').doc(userId).update({
-            isShadowBanned: shadowBanned,
-            updatedAt: new Date().toISOString()
-        });
+        const { error } = await supabaseAdmin.from('users').update({
+            is_shadow_banned: shadowBanned,
+            updated_at: new Date().toISOString()
+        }).eq('id', userId);
+
+        if (error) throw error;
+        
         revalidatePath('/admin/users');
         return { success: true };
     } catch (error) {
@@ -85,16 +99,17 @@ export async function addModeratorNote(userId: string, adminId: string, adminNam
     const isAdmin = await verifyAdminAction();
     if (!isAdmin) return { success: false, error: 'Unauthorized.' };
 
-    if (!db) return { success: false, error: 'Database not configured' };
-
     try {
-        const noteRef = db.collection('users').doc(userId).collection('moderatorNotes').doc();
-        await noteRef.set({
-            adminId,
-            adminName,
+        const { error } = await supabaseAdmin.from('moderator_notes').insert({
+            user_id: userId,
+            admin_id: adminId,
+            admin_name: adminName,
             note,
-            createdAt: new Date().toISOString()
+            created_at: new Date().toISOString()
         });
+        
+        if (error) throw error;
+        
         revalidatePath('/admin/users');
         return { success: true };
     } catch (error) {
@@ -109,22 +124,18 @@ export async function inviteUser(email: string, role: UserRole = 'USER') {
         return { success: false, error: 'Unauthorized.' };
     }
 
-    if (!db) {
-        return { success: false, error: 'Database not configured' };
-    }
-
     try {
-        const invitationRef = db.collection('userInvitations').doc();
-        await invitationRef.set({
+        const { data, error } = await supabaseAdmin.from('user_invitations').insert({
             email,
             role,
-            invitedBy: 'admin',
+            invited_by: 'admin',
             status: 'PENDING',
-            createdAt: new Date().toISOString(),
-            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        });
+            created_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        }).select('id').single();
 
-        return { success: true, invitationId: invitationRef.id };
+        if (error) throw error;
+        return { success: true, invitationId: data.id };
     } catch (error) {
         console.error('Failed to invite user:', error);
         return { success: false, error: 'Failed to send invitation' };
@@ -132,22 +143,20 @@ export async function inviteUser(email: string, role: UserRole = 'USER') {
 }
 
 export async function getUserActivityHistory(userId: string, limit: number = 20) {
-    if (!db) {
-        return [];
-    }
-
     try {
-        const watchHistorySnapshot = await db.collection('users').doc(userId)
-            .collection('watchHistory')
-            .orderBy('createdAt', 'desc')
-            .limit(limit)
-            .get();
+        const { data: watchHistory, error: watchError } = await supabaseAdmin
+            .from('watch_history')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(limit);
 
-        const reviewsSnapshot = await db.collection('users').doc(userId)
-            .collection('reviews')
-            .orderBy('createdAt', 'desc')
-            .limit(limit)
-            .get();
+        const { data: reviews, error: reviewError } = await supabaseAdmin
+            .from('reviews')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(limit);
 
         const activities: Array<{
             type: 'watch' | 'review' | 'comment' | 'favorite';
@@ -155,21 +164,32 @@ export async function getUserActivityHistory(userId: string, limit: number = 20)
             data: Record<string, unknown>;
         }> = [];
 
-        watchHistorySnapshot.docs.forEach((doc) => {
-            const data = doc.data();
+        (watchHistory || []).forEach((item) => {
             activities.push({
                 type: 'watch',
-                timestamp: data.watchedAt?.toDate?.() || new Date(data.watchedAt || Date.now()),
-                data: { animeId: doc.id, ...data },
+                timestamp: new Date(item.created_at),
+                data: { 
+                    animeId: item.anime_id,
+                    animeTitle: item.anime_title,
+                    episodeNumber: item.episode_number,
+                    progress: item.progress,
+                    duration: item.duration,
+                    completed: item.completed
+                },
             });
         });
 
-        reviewsSnapshot.docs.forEach((doc) => {
-            const data = doc.data();
+        (reviews || []).forEach((item) => {
             activities.push({
                 type: 'review',
-                timestamp: data.createdAt?.toDate?.() || new Date(data.createdAt || Date.now()),
-                data: { animeId: doc.id, ...data },
+                timestamp: new Date(item.created_at),
+                data: { 
+                    animeId: item.anime_id,
+                    animeTitle: item.anime_title,
+                    rating: item.rating,
+                    title: item.title,
+                    content: item.content
+                },
             });
         });
 
@@ -183,22 +203,33 @@ export async function getUserActivityHistory(userId: string, limit: number = 20)
 }
 
 export async function getUserById(userId: string) {
-    if (!db) {
-        return null;
-    }
-
     try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        if (!userDoc.exists) {
+        const { data: user, error } = await supabaseAdmin
+            .from('users')
+            .select('*')
+            .eq('id', userId)
+            .single();
+
+        if (error || !user) {
             return null;
         }
 
-        const data = userDoc.data();
         return {
-            id: userDoc.id,
-            ...data,
-            createdAt: data?.createdAt?.toDate?.() || data?.createdAt,
-            lastLoginAt: data?.lastLoginAt?.toDate?.() || data?.lastLoginAt,
+            id: user.id,
+            email: user.email,
+            name: user.username,
+            avatarUrl: user.avatar_url,
+            bio: user.bio,
+            role: user.role,
+            status: user.status,
+            xp: user.xp,
+            level: user.level,
+            voidCoins: user.void_coins,
+            currentStreak: user.current_streak,
+            longestStreak: user.longest_streak,
+            badges: user.badges,
+            createdAt: new Date(user.created_at),
+            lastLoginAt: user.updated_at ? new Date(user.updated_at) : new Date(user.created_at),
         };
     } catch (error) {
         console.error('Failed to get user:', error);
@@ -207,20 +238,27 @@ export async function getUserById(userId: string) {
 }
 
 export async function searchUsers(query: string, limit: number = 20) {
-    if (!db || !query) {
+    if (!query) {
         return [];
     }
 
     try {
-        const snapshot = await db.collection('users')
-            .where('name', '>=', query)
-            .where('name', '<=', query + '\uf8ff')
-            .limit(limit)
-            .get();
+        const { data: users, error } = await supabaseAdmin
+            .from('users')
+            .select('*')
+            .or(`username.ilike.%${query}%,email.ilike.%${query}%`)
+            .limit(limit);
 
-        return snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
+        if (error) throw error;
+
+        return (users || []).map((user) => ({
+            id: user.id,
+            email: user.email,
+            name: user.username,
+            avatarUrl: user.avatar_url,
+            role: user.role,
+            status: user.status,
+            createdAt: user.created_at,
         }));
     } catch (error) {
         console.error('Failed to search users:', error);

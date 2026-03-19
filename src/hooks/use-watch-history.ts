@@ -1,9 +1,12 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { useUser, useFirestore } from '@/firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, limit, addDoc, getDocs, serverTimestamp } from 'firebase/firestore';
+import { createBrowserClient } from "@supabase/ssr";
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import type { AnimeCard } from '@/types';
-import { sanitizeForFirestore } from '@/lib/firebase-utils';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!;
+const supabase = createBrowserClient(supabaseUrl, supabaseKey);
 
 export interface WatchHistoryItem {
   animeId: string;
@@ -17,107 +20,171 @@ export interface WatchHistoryItem {
 }
 
 export function useWatchHistory() {
-  const { user } = useUser();
-  const firestore = useFirestore();
+  const { user } = useSupabaseAuth();
   const [history, setHistory] = useState<WatchHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const mapHistoryItem = (item: any): WatchHistoryItem => ({
+    animeId: item.anime_id,
+    animeName: item.anime_title,
+    animePoster: item.anime_poster,
+    episodeNumber: item.episode_number,
+    episodeId: item.episode_id,
+    watchedAt: item.updated_at || item.created_at,
+    progress: item.progress,
+    duration: item.duration,
+  });
+
   useEffect(() => {
-    if (!user || !firestore) {
-       
+    if (!user) {
       setHistory([]);
-       
       setLoading(false);
       return;
     }
 
-    const q = query(
-      collection(firestore, 'users', user.uid, 'watchHistory'),
-      orderBy('watchedAt', 'desc'),
-      limit(50)
-    );
+    const fetchHistory = async () => {
+      const { data, error } = await supabase
+        .from('watch_history')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false })
+        .limit(50);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => doc.data() as WatchHistoryItem);
-      setHistory(data);
+      if (error) {
+        console.error('Error fetching watch history:', error);
+      } else {
+        setHistory((data || []).map(mapHistoryItem));
+      }
       setLoading(false);
-    }, (error) => {
-      console.error('Error fetching watch history:', error);
-      setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
-  }, [user, firestore]);
+    fetchHistory();
+
+    const channel = supabase
+      .channel(`watch_history_${user.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'watch_history',
+        filter: `user_id=eq.${user.id}`
+      }, () => {
+        fetchHistory();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
 
   const addToHistory = useCallback(async (
     anime: AnimeCard,
     episodeNumber: number,
     episodeId: string
   ) => {
-    if (!user || !firestore) return;
+    if (!user) return;
 
-    const historyItem: any = {
-      animeId: anime.id,
-      animeName: anime.name,
-      animePoster: anime.poster,
-      episodeNumber,
-      episodeId,
-      watchedAt: serverTimestamp(),
-      progress: 0,
-      duration: 0,
-    };
+    // Check if this episode history exists
+    const { data: existing } = await supabase
+      .from('watch_history')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('anime_id', anime.id)
+      .eq('episode_id', episodeId)
+      .single();
 
-    const historyRef = doc(firestore, 'users', user.uid, 'watchHistory', episodeId);
-    await setDoc(historyRef, historyItem, { merge: true });
+    if (existing) {
+      await supabase
+        .from('watch_history')
+        .update({
+          episode_number: episodeNumber,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existing.id);
+    } else {
+      await supabase.from('watch_history').insert({
+        user_id: user.id,
+        anime_id: anime.id,
+        anime_title: anime.name,
+        anime_poster: anime.poster,
+        episode_number: episodeNumber,
+        episode_id: episodeId,
+        updated_at: new Date().toISOString()
+      });
+    }
 
-    const watchlistRef = doc(firestore, 'users', user.uid, 'watchlist', anime.id);
-    await setDoc(watchlistRef, sanitizeForFirestore({
-      ...anime,
+    // Update Watchlist status to WATCHING
+    // Watchlist table HAS a unique constraint (user_id, anime_id)
+    await supabase.from('watchlist').upsert({
+      user_id: user.id,
+      anime_id: anime.id,
+      anime_title: anime.name,
+      anime_poster: anime.poster,
       status: 'WATCHING',
       progress: episodeNumber,
-      totalEpisodes: anime.episodes?.sub || anime.episodes?.dub || 0,
-      updatedAt: new Date().toISOString(),
-    }), { merge: true });
-  }, [user, firestore]);
+      total_episodes: anime.episodes?.sub || anime.episodes?.dub || 0,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id, anime_id' });
+
+  }, [user]);
 
   const clearHistory = useCallback(async () => {
-    if (!user || !firestore) return;
+    if (!user) return;
 
-    const q = query(
-      collection(firestore, 'users', user.uid, 'watchHistory'),
-      orderBy('watchedAt', 'desc'),
-      limit(50)
-    );
+    const { error } = await supabase
+      .from('watch_history')
+      .delete()
+      .eq('user_id', user.id);
 
-    const snapshot = await getDocs(q);
-    const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
-    await Promise.all(deletePromises);
-  }, [user, firestore]);
+    if (error) {
+      console.error('Error clearing history:', error);
+    }
+  }, [user]);
 
   return { history, loading, addToHistory, clearHistory };
 }
 
 export function useWatchProgress(animeId: string, episodeId: string) {
-  const { user } = useUser();
-  const firestore = useFirestore();
+  const { user } = useSupabaseAuth();
 
   const updateProgress = useCallback(async (progress: number, duration: number) => {
-    if (!user || !firestore || !animeId || !episodeId) return;
-
-    const historyRef = doc(firestore, 'users', user.uid, 'watchHistory', episodeId);
+    if (!user || !animeId || !episodeId) return;
 
     try {
-      await setDoc(historyRef, {
-        animeId,
-        episodeId,
-        progress,
-        duration,
-        watchedAt: serverTimestamp()
-      }, { merge: true });
+      // Find history entry for this episode
+      const { data: existing } = await supabase
+        .from('watch_history')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('anime_id', animeId)
+        .eq('episode_id', episodeId)
+        .single();
+
+      if (existing) {
+        await supabase
+          .from('watch_history')
+          .update({
+            progress: Math.floor(progress),
+            duration: Math.floor(duration),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existing.id);
+      } else {
+        // Just insert if doesn't exist (though it usually should from addToHistory)
+        await supabase.from('watch_history').insert({
+          user_id: user.id,
+          anime_id: animeId,
+          episode_id: episodeId,
+          episode_number: 0, // Fallback
+          progress: Math.floor(progress),
+          duration: Math.floor(duration),
+          updated_at: new Date().toISOString()
+        });
+      }
     } catch (error) {
       console.error("Error updating watch progress: ", error);
     }
-  }, [user, firestore, animeId, episodeId]);
+  }, [user, animeId, episodeId]);
 
   return { updateProgress };
 }

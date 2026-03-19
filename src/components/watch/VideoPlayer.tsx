@@ -19,6 +19,8 @@ interface TrackData {
   url: string;
   lang: string;
   default?: boolean;
+  type?: 'vtt' | 'ass' | 'srt' | 'ttml';
+  label?: string;
 }
 
 interface EpisodeSource {
@@ -47,11 +49,41 @@ interface VideoPlayerProps {
   episodeTitle?: string;
 }
 
-const proxyVtt = (url: string, referer?: string) =>
-  `/api/proxy-vtt?url=${encodeURIComponent(url)}${referer ? `&referer=${encodeURIComponent(referer)}` : ""}&ext=.vtt`;
+const PROXY_LIST = [
+  process.env.NEXT_PUBLIC_HLS_PROXY_PRIMARY || 'https://stream.voidanime.online/proxy?url=',
+  process.env.NEXT_PUBLIC_HLS_PROXY_FALLBACK || 'https://proxy-xi-five.vercel.app/proxy?url=',
+];
 
-const proxyM3U8 = (url: string, referer?: string) =>
-  `/api/proxy?url=${encodeURIComponent(url)}${referer ? `&referer=${encodeURIComponent(referer)}` : ""}`;
+const buildProxyUrl = (url: string, referer?: string, proxyIndex: number = 0): string => {
+  const baseProxy = PROXY_LIST[proxyIndex % PROXY_LIST.length];
+  const encodedUrl = encodeURIComponent(url);
+  
+  if (referer) {
+    // Try headers format first
+    const headers = JSON.stringify({ Referer: referer });
+    const encodedHeaders = encodeURIComponent(headers);
+    const headersUrl = `${baseProxy}${encodedUrl}&headers=${encodedHeaders}`;
+    
+    // Also try origin format as fallback
+    const originUrl = `${baseProxy}${encodedUrl}&origin=${encodeURIComponent(referer)}`;
+    
+    // Return headers format (most common)
+    return headersUrl;
+  }
+  return `${baseProxy}${encodedUrl}`;
+};
+
+const isAssSubtitle = (url: string): boolean => {
+  return url?.toLowerCase().includes('.ass') || url?.toLowerCase().includes('format=ass');
+};
+
+const getSubtitleType = (url: string): 'vtt' | 'ass' | 'srt' | 'ttml' => {
+  const lowerUrl = url?.toLowerCase() || '';
+  if (lowerUrl.includes('.ass') || lowerUrl.includes('format=ass')) return 'ass';
+  if (lowerUrl.includes('.srt')) return 'srt';
+  if (lowerUrl.includes('.ttml') || lowerUrl.includes('.xml')) return 'ttml';
+  return 'vtt';
+};
 
 export default function VideoPlayer({
   sources,
@@ -76,6 +108,8 @@ export default function VideoPlayer({
   const [error, setError] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [isLowEndDevice, setIsLowEndDevice] = useState(false);
+  const [proxyIndex, setProxyIndex] = useState(0);
+  const proxyAttemptRef = useRef(0);
 
   useEffect(() => {
     setMounted(true);
@@ -111,17 +145,38 @@ export default function VideoPlayer({
     if (el) (el as any)._skipSection = skipCurrentSection;
   }, [skipCurrentSection]);
 
-  const subtitleTracks = useMemo(() => tracks
-    .filter((t) => t.lang !== "thumbnails" && t.url)
-    .map((t, i) => ({
-      default: t.default ?? i === 0,
-      label: t.lang ?? `Subtitle ${i + 1}`,
-      src: proxyVtt(t.url, referer),
-    })), [tracks, referer]);
+  // Enhanced subtitle handling with ASS support
+  const subtitleTracks = useMemo(() => {
+    return tracks
+      .filter((t) => t.lang !== "thumbnails" && t.url)
+      .map((t, i) => {
+        const subType = getSubtitleType(t.url);
+        const isAss = subType === 'ass';
+        
+        return {
+          default: t.default ?? i === 0,
+          label: t.label || t.lang || `Subtitle ${i + 1}`,
+          lang: (t.lang || 'en').toLowerCase(),
+          src: buildProxyUrl(t.url, referer, proxyIndex),
+          type: isAss ? 'subtitles' : 'subtitles',
+          isAss,
+        };
+      });
+  }, [tracks, referer, proxyIndex]);
+
+  // ASS subtitles need special HLS.js configuration
+  const hasAssSubtitles = useMemo(() => 
+    subtitleTracks.some(t => t.isAss), 
+  [subtitleTracks]);
 
   const thumbnailTrack = useMemo(() => tracks.find((t) => t.lang === "thumbnails" && t.url), [tracks]);
   const sourceUrl = sources[0]?.url;
-  const finalUrl = useMemo(() => referer && sourceUrl ? proxyM3U8(sourceUrl, referer) : sourceUrl, [sourceUrl, referer]);
+  
+  // Always apply proxy for CORS with fallback support
+  const finalUrl = useMemo(() => {
+    if (!sourceUrl) return null;
+    return buildProxyUrl(sourceUrl, referer || undefined, proxyIndex);
+  }, [sourceUrl, referer, proxyIndex]);
 
   const handleTimeUpdate = (time: number, duration: number) => {
     if (!mounted) return;
@@ -147,19 +202,29 @@ export default function VideoPlayer({
     }
   };
 
-  // ─── STABLE HLS CONFIGURATION ───
+  // ─── STABLE HLS CONFIGURATION WITH ASS SUPPORT ───
   const hlsOptions = useMemo(() => ({
+    // Worker for better performance
     enableWorker: true,
-    lowLatencyMode: true,
+    // Low latency for live content
+    lowLatencyMode: false, // Disable for VOD to improve stability
+    // Buffer configuration
     backBufferLength: isLowEndDevice ? 30 : 90,
     maxBufferLength: isLowEndDevice ? 10 : 30,
     maxMaxBufferLength: isLowEndDevice ? 30 : 600,
-    // Standard ABR and buffering
+    // ABR settings
     abrEwmaFastLive: 1,
     abrEwmaSlowLive: 3,
+    // Software decoding
     enableSoftwareAES: true,
-    // Ensure it doesn't crash on high-quality start
+    // Cap quality to prevent crashes
     capLevelToPlayerSize: true,
+    // Subtitle rendering configuration
+    enableWebVTT: true,
+    // ASS subtitle support - HLS.js handles these natively when in HLS streams
+    // For external ASS tracks, the proxy should convert them
+    // Subtitle track settings
+    startLevel: -1, // Auto quality
   }), [isLowEndDevice]);
 
   if (!finalUrl) return null;
@@ -202,7 +267,16 @@ export default function VideoPlayer({
         onPlaying={() => setIsLoading(false)}
         onError={(detail) => {
           console.error("[Vidstack] Media Error:", detail);
-          if (detail.code !== 4) { // Ignore minor abort errors
+          if (detail.code !== 4) {
+            // Try next proxy if current one fails
+            if (proxyAttemptRef.current < PROXY_LIST.length - 1) {
+              proxyAttemptRef.current += 1;
+              setProxyIndex(prev => prev + 1);
+              console.log(`[Proxy] Switching to proxy ${proxyAttemptRef.current + 1}: ${PROXY_LIST[proxyAttemptRef.current]}`);
+              setIsLoading(true);
+              setError(false);
+              return;
+            }
             setError(true);
             if (onError) onError();
           }
@@ -221,13 +295,21 @@ export default function VideoPlayer({
               className="absolute inset-0 w-full h-full object-cover opacity-100 transition-opacity duration-500 group-data-[playing]:opacity-0 group-data-[playing]:pointer-events-none"
             />
           )}
-          {subtitleTracks.map((t) => (
-            <Track key={t.src} src={t.src} kind="subtitles" label={t.label} lang={t.label.toLowerCase()} default={t.default} />
+          {/* Subtitle Tracks - Supports VTT, SRT, and ASS formats via proxy */}
+          {subtitleTracks.map((t, i) => (
+            <Track 
+              key={`${t.src}-${i}`} 
+              src={t.src} 
+              kind="subtitles" 
+              label={t.label} 
+              lang={t.lang} 
+              default={t.default}
+            />
           ))}
         </MediaProvider>
         <DefaultVideoLayout
           icons={defaultLayoutIcons}
-          thumbnails={thumbnailTrack ? proxyVtt(thumbnailTrack.url, referer) : undefined}
+          thumbnails={thumbnailTrack ? buildProxyUrl(thumbnailTrack.url, referer, proxyIndex) : undefined}
         />
       </MediaPlayer>
     </div>

@@ -48,13 +48,15 @@ export function CharacterCarousel({ characters }: CharacterCarouselProps) {
                     <div className="flex h-full w-full">
                       {/* Character Side */}
                       <div className="relative w-1/2 h-full">
-                        <Image
-                          src={char.node.image.large}
-                          alt={char.node.name.full}
-                          fill
-                          sizes="(max-width: 640px) 45vw, (max-width: 1024px) 25vw, 15vw"
-                          className="object-cover transition-transform duration-1000 group-hover/card:scale-110"
-                        />
+                        {char.node.image.large && (
+                          <Image
+                            src={char.node.image.large}
+                            alt={char.node.name.full}
+                            fill
+                            sizes="(max-width: 640px) 45vw, (max-width: 1024px) 25vw, 15vw"
+                            className="object-cover transition-transform duration-1000 group-hover/card:scale-110"
+                          />
+                        )}
                         <div className="absolute inset-0 bg-gradient-to-t from-[#0B0C10] via-transparent to-transparent opacity-90" />
                         <div className="absolute bottom-4 left-4 right-4">
                           <div className="mb-1">
@@ -73,13 +75,15 @@ export function CharacterCarousel({ characters }: CharacterCarouselProps) {
                         {char.voiceActors?.[0] ? (
                           <>
                             <div className="relative flex-1">
-                              <Image
-                                src={char.voiceActors[0].image.large}
-                                alt={char.voiceActors[0].name.full}
-                                fill
-                                sizes="(max-width: 640px) 45vw, (max-width: 1024px) 25vw, 15vw"
-                                className="object-cover opacity-60 group-hover/card:opacity-100 transition-opacity duration-700"
-                              />
+                              {char.voiceActors[0].image.large && (
+                                <Image
+                                  src={char.voiceActors[0].image.large}
+                                  alt={char.voiceActors[0].name.full}
+                                  fill
+                                  sizes="(max-width: 640px) 45vw, (max-width: 1024px) 25vw, 15vw"
+                                  className="object-cover opacity-60 group-hover/card:opacity-100 transition-opacity duration-700"
+                                />
+                              )}
                               <div className="absolute inset-0 bg-gradient-to-t from-[#0B0C10] via-transparent to-transparent opacity-90" />
                             </div>
                             <div className="absolute bottom-4 left-4 right-4 text-right">

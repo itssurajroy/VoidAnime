@@ -33,13 +33,13 @@ export function LobbyClient({ initialRooms }: LobbyClientProps) {
                 <div className="text-center space-y-6">
                     <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-black uppercase tracking-[0.2em]">
                         <Users className="w-3.5 h-3.5" />
-                        Watch Together
+                        Watch Party
                     </div>
                     <h1 className="text-5xl md:text-7xl font-[1000] text-white uppercase tracking-tighter leading-[0.9] font-headline">
                         Watch<span className="text-primary"> Parties</span>
                     </h1>
                     <p className="text-white/40 text-lg max-w-xl mx-auto font-medium italic">
-                        Join active rooms or start watching any anime and create your own watch party.
+                        Join active parties or start watching any anime and create your own watch party.
                     </p>
                 </div>
 
@@ -70,7 +70,7 @@ export function LobbyClient({ initialRooms }: LobbyClientProps) {
                             <Tv className="w-10 h-10 text-white/10" />
                         </div>
                         <div className="space-y-2">
-                            <h3 className="text-xl font-black text-white/60 uppercase tracking-tight">No Active Rooms</h3>
+                            <h3 className="text-xl font-black text-white/60 uppercase tracking-tight">No Active Parties</h3>
                             <p className="text-white/30 text-sm max-w-md mx-auto">
                                 There are no active watch parties right now. Start watching any anime and click the Watch Party button to create one!
                             </p>

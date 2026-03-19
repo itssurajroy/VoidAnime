@@ -1,10 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useUser } from '@/firebase';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
+import { supabase as _supabase } from '@/lib/supabase';
+
+const supabase = _supabase!;
 
 export function useUserRole() {
-  const { user } = useUser();
+  const { user } = useSupabaseAuth();
   const [userRole, setUserRole] = useState<string>('USER');
   const [isLoadingRole, setIsLoadingRole] = useState(true);
 
@@ -21,9 +24,13 @@ export function useUserRole() {
       }
 
       try {
-        const res = await fetch('/api/user/role');
-        if (res.ok && isMounted) {
-          const data = await res.json();
+        const { data, error } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+
+        if (!error && data && isMounted) {
           setUserRole(data.role || 'USER');
         }
       } catch (error) {

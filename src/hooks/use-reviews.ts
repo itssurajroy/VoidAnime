@@ -1,7 +1,9 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { useUser, useFirestore } from '@/firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, limit, addDoc, updateDoc } from 'firebase/firestore';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
+import { supabase as _supabase } from '@/lib/supabase';
+
+const supabase = _supabase!;
 
 export interface UserReview {
   id: string;
@@ -15,40 +17,67 @@ export interface UserReview {
 }
 
 export function useReviews() {
-  const { user } = useUser();
-  const firestore = useFirestore();
+  const { user } = useSupabaseAuth();
   const [reviews, setReviews] = useState<UserReview[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!user || !firestore) {
-       
+  const fetchReviews = useCallback(async () => {
+    if (!user) {
       setReviews([]);
-       
       setLoading(false);
       return;
     }
 
-    const q = query(
-      collection(firestore, 'users', user.uid, 'reviews'),
-      orderBy('createdAt', 'desc'),
-      limit(20)
-    );
+    const { data, error } = await supabase
+      .from('reviews')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as UserReview[];
-      setReviews(data);
-      setLoading(false);
-    }, (error) => {
+    if (error) {
       console.error('Error fetching reviews:', error);
-      setLoading(false);
-    });
+    } else {
+      const mappedData = (data || []).map(r => ({
+        id: r.id,
+        animeId: r.anime_id,
+        animeTitle: r.anime_title,
+        animePoster: r.anime_poster,
+        rating: r.rating,
+        content: r.content,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      })) as UserReview[];
+      setReviews(mappedData);
+    }
+    setLoading(false);
+  }, [user]);
 
-    return () => unsubscribe();
-  }, [user, firestore]);
+  useEffect(() => {
+    fetchReviews();
+
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`user_reviews:${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'reviews',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          fetchReviews();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, fetchReviews]);
 
   const addReview = useCallback(async (
     animeId: string,
@@ -57,40 +86,52 @@ export function useReviews() {
     rating: number,
     content: string
   ) => {
-    if (!user || !firestore) return;
+    if (!user) return;
 
-    const review: Omit<UserReview, 'id'> = {
-      animeId,
-      animeTitle,
-      animePoster,
+    const { error } = await supabase.from('reviews').insert({
+      user_id: user.id,
+      anime_id: animeId,
+      anime_title: animeTitle,
+      anime_poster: animePoster,
       rating,
       content,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+      status: 'PUBLISHED',
+    });
 
-    await addDoc(collection(firestore, 'users', user.uid, 'reviews'), review);
-  }, [user, firestore]);
+    if (error) throw error;
+  }, [user]);
 
   const updateReview = useCallback(async (
     reviewId: string,
     rating: number,
     content: string
   ) => {
-    if (!user || !firestore) return;
+    if (!user) return;
 
-    await updateDoc(doc(firestore, 'users', user.uid, 'reviews', reviewId), {
-      rating,
-      content,
-      updatedAt: new Date().toISOString(),
-    });
-  }, [user, firestore]);
+    const { error } = await supabase
+      .from('reviews')
+      .update({
+        rating,
+        content,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', reviewId)
+      .eq('user_id', user.id);
+
+    if (error) throw error;
+  }, [user]);
 
   const deleteReview = useCallback(async (reviewId: string) => {
-    if (!user || !firestore) return;
+    if (!user) return;
 
-    await deleteDoc(doc(firestore, 'users', user.uid, 'reviews', reviewId));
-  }, [user, firestore]);
+    const { error } = await supabase
+      .from('reviews')
+      .delete()
+      .eq('id', reviewId)
+      .eq('user_id', user.id);
+
+    if (error) throw error;
+  }, [user]);
 
   return { reviews, loading, addReview, updateReview, deleteReview };
 }

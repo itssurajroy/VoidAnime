@@ -1,16 +1,16 @@
 'use client';
 
 import React from 'react';
-import { useUser } from '@/firebase';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import { Loader2, User } from 'lucide-react';
 import { SectionTitle } from '../shared/SectionTitle';
 import { AuthTrigger } from './AuthTrigger';
 import { Button } from '../ui/button';
 
 export function AuthGuard({ children }: { children?: React.ReactNode }) {
-  const { user, isUserLoading } = useUser();
+  const { user, loading } = useSupabaseAuth();
 
-  if (isUserLoading) {
+  if (loading) {
     return (
       <div className="container py-8 px-4 text-center h-96 flex items-center justify-center">
         <Loader2 className="w-16 h-16 mx-auto text-primary animate-spin" />

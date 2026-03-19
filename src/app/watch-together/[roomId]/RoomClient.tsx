@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { useUser } from '@/firebase';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import { useWatchRoom } from '@/hooks/useWatchRoom';
 import { getEpisodeSources, getEpisodeServers } from '@/services/anime';
 import type { PublicRoom } from '@/actions/rooms';
@@ -22,7 +22,7 @@ interface RoomClientProps {
 
 export function RoomClient({ roomId, initialRoom }: RoomClientProps) {
     const router = useRouter();
-    const { user } = useUser();
+    const { user } = useSupabaseAuth();
     const {
         room, participants, messages, status, error, isHost,
         joinRoom, leaveRoom, sendMessage, kickParticipant, togglePlayPause, updatePlaybackState,
@@ -60,9 +60,9 @@ export function RoomClient({ roomId, initialRoom }: RoomClientProps) {
                 const serversRes = await getEpisodeServers(ep);
                 const servers = serversRes.data;
                 const serverList = cat === 'dub' ? servers?.dub : servers?.sub;
-                const server = serverList?.[0]?.serverName || 'hd-1';
+                const serverId = serverList?.[0]?.serverName || 'hd-1';
 
-                const sourcesRes = await getEpisodeSources(ep, server, cat);
+                const sourcesRes = await getEpisodeSources(ep, 'kaido', cat, serverId);
                 if (sourcesRes.data?.sources?.length) {
                     setSourceData(sourcesRes.data);
                 }
@@ -163,7 +163,7 @@ export function RoomClient({ roomId, initialRoom }: RoomClientProps) {
             <div className="min-h-screen bg-[#0B0C10] flex items-center justify-center text-white">
                 <div className="text-center space-y-4">
                     <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto" />
-                    <p className="text-white/50 text-sm font-bold uppercase tracking-widest">Joining Room...</p>
+                    <p className="text-white/50 text-sm font-bold uppercase tracking-widest">Joining Party...</p>
                 </div>
             </div>
         );
@@ -177,11 +177,11 @@ export function RoomClient({ roomId, initialRoom }: RoomClientProps) {
                     <div className="w-20 h-20 mx-auto rounded-3xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
                         <X className="w-8 h-8 text-red-400" />
                     </div>
-                    <h2 className="text-2xl font-black uppercase tracking-tight">Room Error</h2>
-                    <p className="text-white/40 text-sm">{error || 'Failed to join room'}</p>
+                    <h2 className="text-2xl font-black uppercase tracking-tight">Party Error</h2>
+                    <p className="text-white/40 text-sm">{error || 'Failed to join party'}</p>
                     <Link href="/watch-together">
                         <Button className="h-12 px-8 rounded-2xl bg-white/10 text-white font-black uppercase tracking-[0.15em] text-xs hover:bg-white/20">
-                            Browse Rooms
+                            Browse Parties
                         </Button>
                     </Link>
                 </div>
@@ -386,8 +386,8 @@ export function RoomClient({ roomId, initialRoom }: RoomClientProps) {
                                                             {msg.displayName}
                                                         </span>
                                                         <span className="text-[9px] text-white/15 font-bold shrink-0">
-                                                            {msg.timestamp && typeof (msg.timestamp as any).toDate === 'function'
-                                                                ? (msg.timestamp as any).toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                                            {msg.timestamp 
+                                                                ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                                                                 : ''}
                                                         </span>
                                                     </div>

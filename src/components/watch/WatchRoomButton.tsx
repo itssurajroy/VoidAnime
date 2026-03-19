@@ -2,7 +2,7 @@
 
 import { Users, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useUser } from '@/firebase';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { createRoom } from '@/actions/rooms';
@@ -30,7 +30,7 @@ export function WatchRoomButton({
   variant = 'default',
   iconOnly = false
 }: WatchRoomButtonProps) {
-  const { user } = useUser();
+  const { user } = useSupabaseAuth();
   const router = useRouter();
   const { toast } = useToast();
   const [isCreating, setIsCreating] = useState(false);
@@ -53,8 +53,8 @@ export function WatchRoomButton({
         animeTitle,
         animePoster,
         episodeNumber,
-        hostId: user.uid,
-        hostName: user.displayName || 'Host',
+        hostId: user.id,
+        hostName: user.user_metadata?.username || 'Host',
       });
 
       toast({

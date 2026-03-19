@@ -1,21 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useUser, useFirestore } from '@/firebase';
-import { 
-  collection, 
-  query, 
-  orderBy, 
-  limit as firestoreLimit, 
-  onSnapshot, 
-  addDoc, 
-  doc, 
-  updateDoc, 
-  deleteDoc, 
-  serverTimestamp,
-  where,
-  increment
-} from 'firebase/firestore';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
+import { supabase as _supabase } from '@/lib/supabase';
+
+const supabase = _supabase!;
 
 export interface CommunityPost {
   id: string;
@@ -37,148 +26,182 @@ export interface CommunityPost {
 }
 
 export function useCommunity(categoryFilter: string = 'all') {
-  const { user } = useUser();
-  const firestore = useFirestore();
+  const { user } = useSupabaseAuth();
   const [posts, setPosts] = useState<CommunityPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!firestore) {
-      setPosts([]);
-      setLoading(false);
-      return;
-    }
-
+  const fetchPosts = useCallback(async () => {
     setLoading(true);
     setError(null);
 
-    const postsRef = collection(firestore, 'community_posts');
-    let q;
+    let query = supabase
+      .from('community_posts')
+      .select('*, users(username, avatar_url, role)')
+      .order('created_at', { ascending: false })
+      .limit(50);
 
-    const baseConstraints = [orderBy('createdAt', 'desc'), firestoreLimit(50)];
-
-    if (categoryFilter === 'all') {
-      q = query(postsRef, ...baseConstraints);
-    } else {
-      q = query(
-        postsRef, 
-        where('category', '==', categoryFilter),
-        ...baseConstraints
-      );
+    if (categoryFilter !== 'all') {
+      query = query.eq('category', categoryFilter.toUpperCase());
     }
 
-    const unsubscribe = onSnapshot(q, 
-      (snapshot) => {
-        const fetchedPosts = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as CommunityPost[];
-        
-        // Sort pinned posts to the top
-        fetchedPosts.sort((a, b) => {
-          if (a.isPinned && !b.isPinned) return -1;
-          if (!a.isPinned && b.isPinned) return 1;
-          return 0;
-        });
+    const { data, error: fetchError } = await query;
 
-        setPosts(fetchedPosts);
-        setLoading(false);
-      },
-      (err) => {
-        console.error('Error fetching community posts:', err);
-        setError('Failed to load posts');
-        setLoading(false);
-      }
-    );
+    if (fetchError) {
+      console.error('Error fetching community posts:', fetchError);
+      setError('Failed to load posts');
+    } else {
+      const mappedPosts = (data || []).map((p: any) => ({
+        id: p.id,
+        userId: p.user_id,
+        userName: p.users?.username || 'Anonymous',
+        userAvatar: p.users?.avatar_url || '',
+        title: p.title,
+        content: p.content,
+        category: p.category,
+        image: p.image || null,
+        createdAt: p.created_at,
+        updatedAt: p.updated_at,
+        likes: p.likes || 0,
+        commentsCount: p.comments_count || 0,
+        isPinned: p.is_pinned || false,
+        isAdmin: p.users?.role === 'ADMIN' || p.users?.role === 'SUPER_ADMIN',
+        isHidden: p.is_hidden || false,
+        reportCount: p.report_count || 0,
+      })) as CommunityPost[];
+      
+      // Sort pinned posts to the top
+      mappedPosts.sort((a, b) => {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        return 0;
+      });
 
-    return () => unsubscribe();
-  }, [firestore, categoryFilter]);
+      setPosts(mappedPosts);
+    }
+    setLoading(false);
+  }, [categoryFilter]);
+
+  useEffect(() => {
+    fetchPosts();
+
+    const channel = supabase
+      .channel('community_posts_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'community_posts',
+        },
+        () => {
+          fetchPosts();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchPosts]);
 
   const addPost = useCallback(async (title: string, content: string, category: string, isAdminStatus: boolean = false, imageUrl?: string) => {
-    if (!user || !firestore || !title.trim() || !content.trim()) {
+    if (!user || !title.trim() || !content.trim()) {
       throw new Error('Cannot add post');
     }
 
-    const postData = {
-      userId: user.uid,
-      userName: user.displayName || user.email?.split('@')[0] || 'Anonymous',
-      userAvatar: user.photoURL || 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + user.uid,
+    const { data, error } = await supabase.from('community_posts').insert({
+      user_id: user.id,
       title: title.trim(),
       content: content.trim(),
-      category,
+      category: category.toUpperCase(),
       image: imageUrl || null,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
       likes: 0,
-      commentsCount: 0,
-      isPinned: false,
-      isAdmin: isAdminStatus,
-      isHidden: false,
-      reportCount: 0,
-    };
+      comments_count: 0,
+      is_pinned: false,
+      is_hidden: false,
+      report_count: 0,
+    }).select().single();
 
-    const docRef = await addDoc(collection(firestore, 'community_posts'), postData);
-    return docRef.id;
-  }, [user, firestore]);
+    if (error) throw error;
+    return data.id;
+  }, [user]);
 
   const deletePost = useCallback(async (postId: string) => {
-    if (!user || !firestore) {
-      throw new Error('Cannot delete post');
-    }
+    if (!user) throw new Error('Cannot delete post');
 
-    await deleteDoc(doc(firestore, 'community_posts', postId));
-  }, [user, firestore]);
+    const { error } = await supabase
+      .from('community_posts')
+      .delete()
+      .eq('id', postId)
+      .eq('user_id', user.id);
+
+    if (error) throw error;
+  }, [user]);
 
   const updatePost = useCallback(async (postId: string, newTitle: string, newContent: string, imageUrl?: string) => {
-    if (!user || !firestore || !newTitle.trim() || !newContent.trim()) {
+    if (!user || !newTitle.trim() || !newContent.trim()) {
       throw new Error('Cannot update post');
     }
 
-    const postRef = doc(firestore, 'community_posts', postId);
-    await updateDoc(postRef, {
-      title: newTitle.trim(),
-      content: newContent.trim(),
-      image: imageUrl || null,
-      updatedAt: serverTimestamp(),
-    });
-  }, [user, firestore]);
+    const { error } = await supabase
+      .from('community_posts')
+      .update({
+        title: newTitle.trim(),
+        content: newContent.trim(),
+        image: imageUrl || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', postId)
+      .eq('user_id', user.id);
+
+    if (error) throw error;
+  }, [user]);
 
   const likePost = useCallback(async (postId: string) => {
-    if (!user || !firestore) return;
+    if (!user) return;
 
-    const postRef = doc(firestore, 'community_posts', postId);
-    await updateDoc(postRef, {
-      likes: increment(1)
-    });
-  }, [user, firestore]);
+    const { data: post } = await supabase.from('community_posts').select('likes').eq('id', postId).single();
+    if (post) {
+      await supabase.from('community_posts').update({ likes: (post.likes || 0) + 1 }).eq('id', postId);
+    }
+  }, [user]);
 
   const togglePin = useCallback(async (postId: string, currentPinStatus: boolean) => {
-    if (!user || !firestore) return;
-    const postRef = doc(firestore, 'community_posts', postId);
-    await updateDoc(postRef, {
-      isPinned: !currentPinStatus,
-      updatedAt: serverTimestamp(),
-    });
-  }, [user, firestore]);
+    if (!user) return;
+    await supabase
+      .from('community_posts')
+      .update({
+        is_pinned: !currentPinStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', postId);
+  }, [user]);
 
   const hidePost = useCallback(async (postId: string, currentHiddenStatus: boolean) => {
-    if (!user || !firestore) return;
-    const postRef = doc(firestore, 'community_posts', postId);
-    await updateDoc(postRef, {
-      isHidden: !currentHiddenStatus,
-      updatedAt: serverTimestamp(),
-    });
-  }, [user, firestore]);
+    if (!user) return;
+    await supabase
+      .from('community_posts')
+      .update({
+        is_hidden: !currentHiddenStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', postId);
+  }, [user]);
 
   const reportPost = useCallback(async (postId: string) => {
-    if (!user || !firestore) return;
-    const postRef = doc(firestore, 'community_posts', postId);
-    await updateDoc(postRef, {
-      reportCount: increment(1),
-      updatedAt: serverTimestamp(),
-    });
-  }, [user, firestore]);
+    if (!user) return;
+    const { data: post } = await supabase.from('community_posts').select('report_count').eq('id', postId).single();
+    if (post) {
+      await supabase
+        .from('community_posts')
+        .update({
+          report_count: (post.report_count || 0) + 1,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', postId);
+    }
+  }, [user]);
 
   return {
     posts,

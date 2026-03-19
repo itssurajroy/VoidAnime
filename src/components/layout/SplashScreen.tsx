@@ -15,12 +15,12 @@ export function SplashScreen() {
         const randomIndex = Math.floor(Math.random() * ANIME_QUOTES.length);
         setQuote(ANIME_QUOTES[randomIndex]);
 
-        // Show for 3.5s to let user read the quote
+        // Show for 2s to let user read the quote
         const timer = setTimeout(() => {
             setIsVisible(false);
             // Remove from DOM after transition
             setTimeout(() => setShouldRender(false), 500);
-        }, 3500);
+        }, 2000);
 
         return () => clearTimeout(timer);
     }, []);

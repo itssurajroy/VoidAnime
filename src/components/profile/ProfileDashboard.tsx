@@ -1,11 +1,10 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { useUser, useFirestore, useAuth } from '@/firebase';
-import { useDoc } from '@/firebase/firestore/use-doc';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import { getXpForNextLevel, AVAILABLE_BADGES } from '@/types/gamification';
-import { useWatchlist } from '@/hooks/use-watchlist';
-import { useWatchHistory } from '@/hooks/use-watch-history';
+import { useWatchlist } from '@/hooks/use-supabase-watchlist';
+import { useWatchHistory } from '@/hooks/use-supabase-watch-history';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 import { 
@@ -26,13 +25,10 @@ import {
     ExternalLink,
     CalendarDays
 } from 'lucide-react';
-import { doc } from 'firebase/firestore';
 import { RankBadge } from './RankBadge';
-import { signOut } from 'firebase/auth';
 import Image from 'next/image';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { useUserStats } from '@/hooks/use-user-stats';
 
 const iconMap: Record<string, React.ReactNode> = {
     Play: <Play className="w-5 h-5" />,
@@ -43,258 +39,166 @@ const iconMap: Record<string, React.ReactNode> = {
 };
 
 export default function ProfileDashboard() {
-    const { user, isUserLoading } = useUser();
-    const auth = useAuth();
-    const firestore = useFirestore();
+    const { user, loading: userLoading, signOut } = useSupabaseAuth();
     const { watchlist, loading: watchlistLoading } = useWatchlist();
     const { history, loading: historyLoading } = useWatchHistory();
-    const { rank, rankColor, level: statsLevel } = useUserStats(watchlist);
 
-    const userDocRef = useMemo(() => {
-        const uid = user?.uid;
-        if (!firestore || !uid) return null;
-        return doc(firestore, 'users', uid);
-    }, [firestore, user?.uid]);
-
-    const { data: userDoc, isLoading: isUserDocLoading } = useDoc(userDocRef);
+    const xp = watchlist.length * 10;
+    const level = Math.floor(xp / 100) + 1;
+    const { currentLevelXp, nextLevelXp, progress } = getXpForNextLevel(xp);
+    const rank = level >= 50 ? 'GOD' : level >= 40 ? 'LEGEND' : level >= 30 ? 'MASTER' : level >= 20 ? 'ELITE' : level >= 10 ? 'PRO' : 'NOVICE';
+    const rankColor = level >= 50 ? 'bg-yellow-400' : level >= 40 ? 'bg-purple-400' : level >= 30 ? 'bg-red-400' : level >= 20 ? 'bg-blue-400' : level >= 10 ? 'bg-green-400' : 'bg-gray-400';
 
     const handleLogout = async () => {
-        if (auth) await signOut(auth);
+        await signOut();
     };
 
-    if (isUserLoading || isUserDocLoading || watchlistLoading) {
+    if (userLoading || watchlistLoading) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center pt-20 bg-background gap-4 text-center">
                 <div className="relative w-20 h-20">
                     <div className="absolute inset-0 rounded-full border-4 border-primary/20" />
                     <Loader2 className="w-20 h-20 animate-spin text-primary relative z-10" />
                 </div>
-                <p className="text-white/20 text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Accessing User Records...</p>
+                <p className="text-white/40 font-bold uppercase tracking-[0.3em] text-xs animate-pulse">Loading Profile...</p>
             </div>
         );
     }
 
-    if (!user || !userDoc) {
+    if (!user) {
         return (
-            <div className="min-h-screen flex flex-col items-center justify-center pt-20 bg-background px-6 text-center">
-                <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center mb-8">
-                    <Shield className="w-10 h-10 text-white/20" />
-                </div>
-                <h2 className="text-3xl font-black text-white uppercase tracking-widest mb-4">Identity Required</h2>
-                <p className="text-white/40 max-w-xs mb-10">Sign in to your account to view your personalized dashboard, stats, and earned achievements.</p>
-                <Link href="/welcome" className="px-10 py-4 bg-primary text-black font-black uppercase tracking-widest text-[11px] rounded-2xl shadow-xl shadow-primary/20 hover:scale-105 transition-all">
-                    Login / Sign Up
+            <div className="min-h-screen flex flex-col items-center justify-center pt-20 bg-background gap-4 text-center">
+                <Shield className="w-16 h-16 text-white/20" />
+                <p className="text-white/60 font-bold uppercase tracking-[0.3em] text-xs">Please log in to view your profile</p>
+                <Link href="/">
+                    <Button className="bg-primary text-black font-bold uppercase tracking-wider">Go Home</Button>
                 </Link>
             </div>
         );
     }
 
-    const xp = userDoc.xp || 0;
-    const level = userDoc.level || statsLevel || 1;
-    const { currentLevelXp, nextLevelXp, progress } = getXpForNextLevel(xp);
-    const earnedBadgeIds = userDoc.badges || [];
-    const coins = userDoc.voidCoins || 0;
-    const streak = userDoc.currentStreak || 0;
-
-    const watchingCount = watchlist.filter(w => w.status === 'WATCHING').length;
-    const completedCount = watchlist.filter(w => w.status === 'COMPLETED').length;
-
     return (
-        <div className="min-h-screen bg-background pb-32 pt-10 md:pt-20">
-            
-            {/* Dynamic Background Glow */}
-            <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full h-[600px] pointer-events-none z-0">
-                <div 
-                    className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[140%] h-[140%] opacity-[0.05] blur-[140px] rounded-full"
-                    style={{ background: `radial-gradient(circle, var(--color-primary) 0%, transparent 70%)` }}
-                />
+        <div className="min-h-screen bg-background">
+            {/* Header Banner */}
+            <div className="relative h-48 md:h-64 bg-gradient-to-br from-primary/20 via-background to-background">
+                <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10" />
             </div>
 
-            <div className="container max-w-2xl mx-auto px-4 relative z-10 space-y-10">
-                
-                {/* 1. Header & Identity */}
-                <div className="flex items-center gap-6">
-                    <div className="relative shrink-0">
-                        <div className="w-24 h-24 md:w-32 md:h-32 rounded-[32px] overflow-hidden border-4 border-white/5 saas-shadow relative bg-white/5">
-                            {user.photoURL ? (
-                                <Image src={user.photoURL} alt="Avatar" fill className="object-cover" />
-                            ) : (
-                                <div className="w-full h-full flex items-center justify-center text-4xl font-black text-primary/40 bg-white/5">
-                                    {user.displayName?.charAt(0) || 'U'}
-                                </div>
-                            )}
+            {/* Profile Header */}
+            <div className="container max-w-6xl mx-auto px-4 -mt-20 relative z-10">
+                <div className="flex flex-col md:flex-row gap-6 items-start md:items-end">
+                    <div className="relative">
+                        <div className="w-32 h-32 md:w-40 md:h-40 rounded-2xl overflow-hidden border-4 border-background shadow-2xl">
+                            <Image 
+                                src={user.user_metadata?.avatar_url || '/placeholder-avatar.png'}
+                                alt={user.user_metadata?.username || 'User'}
+                                width={160}
+                                height={160}
+                                className="object-cover"
+                            />
                         </div>
-                        <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-primary rounded-2xl flex items-center justify-center border-4 border-background shadow-lg">
-                            <span className="text-black font-black text-xs">{level}</span>
+                        <div className="absolute -bottom-3 -right-3 w-12 h-12 bg-background rounded-xl border-2 border-primary flex items-center justify-center shadow-lg">
+                            <RankBadge rank={rank} className={cn("w-6 h-6", rankColor)} />
                         </div>
                     </div>
                     
-                    <div className="flex-1 min-w-0">
-                        <h1 className="text-2xl md:text-4xl font-black text-white uppercase tracking-tighter truncate leading-tight">
-                            {user.displayName || 'Guest User'}
-                        </h1>
-                        <div className="flex items-center gap-3 mt-1.5">
-                            <div className={cn("flex items-center gap-1.5 px-2.5 py-1 bg-white/5 rounded-lg border border-white/5", rankColor)}>
-                                <RankBadge rank={rank} className="w-3 h-3" />
-                                <span className="text-[10px] font-black uppercase tracking-widest">{rank}</span>
-                            </div>
-                            <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">
-                                JOINED {new Date(user.metadata.creationTime || '').getFullYear()}
-                            </span>
-                        </div>
-                    </div>
-
-                    <Button variant="ghost" size="icon" className="text-white/20 hover:text-red-400 hover:bg-red-400/5 rounded-2xl" onClick={handleLogout}>
-                        <LogOut className="w-5 h-5" />
-                    </Button>
-                </div>
-
-                {/* 2. XP Progression Bar */}
-                <div className="bg-white/[0.03] backdrop-blur-3xl border border-white/5 rounded-[32px] p-6 space-y-4">
-                    <div className="flex justify-between items-end">
-                        <div className="space-y-1">
-                            <p className="text-[9px] font-black text-white/30 uppercase tracking-[0.3em]">Current Progression</p>
-                            <p className="text-lg font-black text-white tracking-tighter uppercase leading-none">Level {level}</p>
-                        </div>
-                        <p className="text-[10px] font-black text-primary tracking-[0.1em] uppercase bg-primary/10 px-3 py-1 rounded-full border border-primary/20 italic">
-                            {currentLevelXp} / {nextLevelXp} XP
-                        </p>
-                    </div>
-                    <div className="relative h-2.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
-                        <div 
-                            className="absolute top-0 left-0 h-full bg-gradient-to-r from-primary to-purple-500 transition-all duration-1000 ease-out shadow-[0_0_15px_rgba(244,63,94,0.5)]"
-                            style={{ width: `${progress}%` }}
-                        />
-                    </div>
-                </div>
-
-                {/* 3. Quick Action Grid */}
-                <div className="grid grid-cols-2 gap-4">
-                    <Link href="/account?section=watchlist" className="bg-white/[0.03] backdrop-blur-3xl border border-white/5 rounded-[32px] p-6 group hover:bg-primary transition-all duration-500">
-                        <div className="flex flex-col gap-4">
-                            <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary group-hover:bg-black group-hover:text-white group-hover:border-transparent transition-all">
-                                <ListVideo className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <p className="text-white group-hover:text-black font-black uppercase tracking-tighter text-lg leading-none">Watchlist</p>
-                                <p className="text-[10px] text-white/30 group-hover:text-black/40 font-bold uppercase tracking-widest mt-1.5">{watchingCount} Series Active</p>
-                            </div>
-                        </div>
-                    </Link>
-
-                    <Link href="/account?section=history" className="bg-white/[0.03] backdrop-blur-3xl border border-white/5 rounded-[32px] p-6 group hover:bg-white/10 transition-all duration-500">
-                        <div className="flex flex-col gap-4">
-                            <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-white transition-all">
-                                <History className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <p className="text-white font-black uppercase tracking-tighter text-lg leading-none">History</p>
-                                <p className="text-[10px] text-white/30 font-bold uppercase tracking-widest mt-1.5">View Recent Activity</p>
-                            </div>
-                        </div>
-                    </Link>
-
-                    <Link href="/account?section=settings" className="bg-white/[0.03] backdrop-blur-3xl border border-white/5 rounded-[32px] p-6 group hover:bg-white/10 transition-all duration-500">
-                        <div className="flex flex-col gap-4">
-                            <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-white transition-all">
-                                <Settings className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <p className="text-white font-black uppercase tracking-tighter text-lg leading-none">Settings</p>
-                                <p className="text-[10px] text-white/30 font-bold uppercase tracking-widest mt-1.5">Manage Account</p>
-                            </div>
-                        </div>
-                    </Link>
-
-                    <div className="bg-white/[0.03] backdrop-blur-3xl border border-white/5 rounded-[32px] p-6 group">
-                        <div className="flex flex-col gap-4">
-                            <div className="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 group-hover:scale-110 transition-transform">
-                                <Coins className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <p className="text-white font-black uppercase tracking-tighter text-lg leading-none">{coins}</p>
-                                <p className="text-[10px] text-white/30 font-bold uppercase tracking-widest mt-1.5">Void Coins</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* 4. Statistics Block */}
-                <div className="space-y-6">
-                    <div className="flex items-center gap-4 px-2">
-                        <TrendingUp className="w-5 h-5 text-primary" />
-                        <h2 className="text-xl font-black text-white uppercase tracking-widest">Global Stats</h2>
-                    </div>
-                    <div className="bg-white/[0.03] border border-white/5 rounded-[40px] p-8 grid grid-cols-2 gap-10 relative overflow-hidden">
-                        <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 blur-3xl pointer-events-none" />
-                        <div className="space-y-1 border-l-2 border-primary/20 pl-6">
-                            <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">Anime Completed</p>
-                            <p className="text-3xl font-black text-white tabular-nums">{completedCount}</p>
-                        </div>
-                        <div className="space-y-1 border-l-2 border-white/10 pl-6">
-                            <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">Total Titles</p>
-                            <p className="text-3xl font-black text-white tabular-nums">{watchlist.length}</p>
-                        </div>
-                    </div>
-                </div>
-
-                {/* 5. Achievements Preview */}
-                <div className="space-y-6">
-                    <div className="flex items-center justify-between px-2">
-                        <div className="flex items-center gap-4">
-                            <Trophy className="w-5 h-5 text-yellow-500" />
-                            <h2 className="text-xl font-black text-white uppercase tracking-widest">Trophy Room</h2>
-                        </div>
-                        <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">
-                            {earnedBadgeIds.length} / {AVAILABLE_BADGES.length}
-                        </span>
-                    </div>
-
-                    <div className="flex overflow-x-auto gap-4 pb-4 custom-scrollbar snap-x">
-                        {AVAILABLE_BADGES.map(badge => {
-                            const isEarned = earnedBadgeIds.includes(badge.id);
-                            return (
-                                <div key={badge.id} className={cn(
-                                    "flex-shrink-0 w-40 p-6 rounded-[32px] flex flex-col items-center text-center gap-4 snap-center transition-all duration-500 border",
-                                    isEarned ? "bg-white/[0.04] border-primary/30" : "bg-white/[0.01] border-white/5 opacity-40 grayscale"
-                                )}>
-                                    <div className={cn(
-                                        "w-14 h-14 rounded-2xl flex items-center justify-center transition-all",
-                                        isEarned ? "bg-primary/20 text-primary shadow-[0_0_20px_rgba(244,63,94,0.3)]" : "bg-white/5 text-white/20"
-                                    )}>
-                                        {iconMap[badge.icon] || <Trophy className="w-6 h-6" />}
-                                    </div>
-                                    <div className="space-y-1">
-                                        <p className="text-[11px] font-black text-white uppercase tracking-tight">{badge.name}</p>
-                                        <p className="text-[8px] text-white/30 font-bold uppercase leading-tight line-clamp-2">{badge.description}</p>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                {/* 6. Footer Links */}
-                <div className="pt-10 flex flex-col gap-3">
-                    <Link href="/terms" className="flex items-center justify-between p-5 rounded-2xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.05] transition-all group">
-                        <span className="text-[10px] font-black text-white/40 uppercase tracking-widest group-hover:text-white transition-colors">Terms of Service</span>
-                        <ChevronRight className="w-4 h-4 text-white/10 group-hover:text-primary transition-colors" />
-                    </Link>
-                    <Link href="/privacy" className="flex items-center justify-between p-5 rounded-2xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.05] transition-all group">
-                        <span className="text-[10px] font-black text-white/40 uppercase tracking-widest group-hover:text-white transition-colors">Privacy Policy</span>
-                        <ChevronRight className="w-4 h-4 text-white/10 group-hover:text-primary transition-colors" />
-                    </Link>
-                    <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-5 rounded-2xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.05] transition-all group">
+                    <div className="flex-1 space-y-2 pb-4">
                         <div className="flex items-center gap-3">
-                            <span className="text-[10px] font-black text-white/40 uppercase tracking-widest group-hover:text-white transition-colors">Project Source</span>
-                            <ExternalLink className="w-3 h-3 text-white/10" />
+                            <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">{user.user_metadata?.username || 'User'}</h1>
+                            <span className="px-3 py-1 bg-primary/20 text-primary text-xs font-black uppercase tracking-widest rounded-full">Level {level}</span>
                         </div>
-                        <ChevronRight className="w-4 h-4 text-white/10 group-hover:text-primary transition-colors" />
-                    </a>
+                        <p className="text-white/40 font-medium">{user.email}</p>
+                    </div>
+
+                    <div className="flex gap-3">
+                        <Link href="/settings">
+                            <Button variant="outline" className="gap-2">
+                                <Settings className="w-4 h-4" />
+                                Settings
+                            </Button>
+                        </Link>
+                        <Button variant="ghost" onClick={handleLogout} className="gap-2 text-red-400 hover:text-red-300 hover:bg-red-400/10">
+                            <LogOut className="w-4 h-4" />
+                            Logout
+                        </Button>
+                    </div>
                 </div>
 
-                <div className="text-center pt-6 opacity-20">
-                    <p className="text-[9px] font-black text-white uppercase tracking-[0.5em]">Void User Panel v2.0</p>
+                {/* Stats Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
+                    <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2">
+                        <div className="flex items-center gap-2 text-white/40">
+                            <Trophy className="w-4 h-4" />
+                            <span className="text-xs font-bold uppercase tracking-wider">Rank</span>
+                        </div>
+                        <p className="text-2xl font-black text-primary">{rank}</p>
+                    </div>
+                    <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2">
+                        <div className="flex items-center gap-2 text-white/40">
+                            <Flame className="w-4 h-4" />
+                            <span className="text-xs font-bold uppercase tracking-wider">XP</span>
+                        </div>
+                        <p className="text-2xl font-black">{xp.toLocaleString()}</p>
+                    </div>
+                    <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2">
+                        <div className="flex items-center gap-2 text-white/40">
+                            <ListVideo className="w-4 h-4" />
+                            <span className="text-xs font-bold uppercase tracking-wider">Watching</span>
+                        </div>
+                        <p className="text-2xl font-black">{watchlist.filter(w => w.status === 'WATCHING').length}</p>
+                    </div>
+                    <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2">
+                        <div className="flex items-center gap-2 text-white/40">
+                            <History className="w-4 h-4" />
+                            <span className="text-xs font-bold uppercase tracking-wider">Completed</span>
+                        </div>
+                        <p className="text-2xl font-black">{watchlist.filter(w => w.status === 'COMPLETED').length}</p>
+                    </div>
+                </div>
+
+                {/* XP Progress */}
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mt-6">
+                    <div className="flex justify-between text-sm mb-2">
+                        <span className="text-white/60 font-medium">Level Progress</span>
+                        <span className="text-primary font-bold">{xp} / {nextLevelXp} XP</span>
+                    </div>
+                    <Progress value={progress} className="h-3 bg-white/10" />
+                    <div className="flex justify-between text-xs text-white/30 mt-2">
+                        <span>Level {level}</span>
+                        <span>Level {level + 1}</span>
+                    </div>
+                </div>
+
+                {/* Quick Actions */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+                    <Link href="/watchlist" className="group">
+                        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 hover:bg-white/10 transition-all">
+                            <ListVideo className="w-8 h-8 text-primary mb-2" />
+                            <p className="font-bold">Watchlist</p>
+                            <p className="text-xs text-white/40">{watchlist.length} items</p>
+                        </div>
+                    </Link>
+                    <Link href="/history" className="group">
+                        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 hover:bg-white/10 transition-all">
+                            <History className="w-8 h-8 text-blue-400 mb-2" />
+                            <p className="font-bold">History</p>
+                            <p className="text-xs text-white/40">{history.length} episodes</p>
+                        </div>
+                    </Link>
+                    <Link href="/community" className="group">
+                        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 hover:bg-white/10 transition-all">
+                            <Users className="w-8 h-8 text-green-400 mb-2" />
+                            <p className="font-bold">Community</p>
+                            <p className="text-xs text-white/40">Join discussion</p>
+                        </div>
+                    </Link>
+                    <Link href="/leaderboard" className="group">
+                        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 hover:bg-white/10 transition-all">
+                            <Trophy className="w-8 h-8 text-yellow-400 mb-2" />
+                            <p className="font-bold">Leaderboard</p>
+                            <p className="text-xs text-white/40">Compete now</p>
+                        </div>
+                    </Link>
                 </div>
             </div>
         </div>
